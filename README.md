@@ -1,0 +1,1 @@
+To run the code, do "uv run main.py"
