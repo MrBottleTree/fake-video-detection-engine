@@ -47,6 +47,4 @@ def run(state: dict) -> dict:
         print(f"Error in A2 node: {e}")
         raise e
 
-    print("Node A2: VAD and ASR completed.")
-    print(state)
     return state
