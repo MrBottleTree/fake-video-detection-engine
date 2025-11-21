@@ -32,7 +32,12 @@ def run(state: dict) -> dict:
     except Exception as e:
         print(f"Error in A3 node: {e}")
         raise e
-    
-    print(state)
+
+    if state.get("debug", False):
+        print(f"[DEBUG] A3: Onset Detection Method: librosa.onset.onset_detect")
+        print(f"[DEBUG] A3: Total Onsets: {state.get('onset_count')}")
+        onsets = state.get("audio_onsets", [])
+        if onsets:
+            print(f"[DEBUG] A3: First 5 Onsets: {onsets[:5]}")
 
     return state
