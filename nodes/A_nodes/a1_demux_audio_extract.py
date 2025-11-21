@@ -39,4 +39,8 @@ def run(state: dict) -> dict:
         print(f"Error standardizing audio: {e}")
         raise e
 
+    if state.get("debug", False):
+        print(f"[DEBUG] A1: Audio standardized to {output_path}")
+        print(f"[DEBUG] A1: Sample Rate: 16000, Channels: 1")
+
     return state
