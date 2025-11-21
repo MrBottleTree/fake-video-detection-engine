@@ -1,3 +1,4 @@
+import argparse
 from langgraph.graph import StateGraph, END
 from nodes import *
 import os
@@ -20,9 +21,11 @@ class State(TypedDict):
     audio_path: Annotated[Optional[str], overwrite]
     metadata: Annotated[Optional[Dict[str, Any]], overwrite]
     fake_probability: Annotated[Optional[float], overwrite]
+    debug: Annotated[bool, overwrite]
 
 def in_node(state: State) -> State:
     input_path = state["input_path"]
+    debug = state.get("debug", False)
     
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join("processed", f"video_{timestamp}")
@@ -37,8 +40,8 @@ def in_node(state: State) -> State:
             'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': not debug,
+            'no_warnings': not debug,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(input_path, download=True)
@@ -84,12 +87,11 @@ def in_node(state: State) -> State:
 
     print(f"Processing complete. Video: {video_path}, Audio: {audio_path}")
     
-    print(f"Processing complete. Video: {video_path}, Audio: {audio_path}")
-    
     return {
         "video_path": video_path,
         "audio_path": audio_path,
-        "metadata": metadata
+        "metadata": metadata,
+        "debug": debug
     }
 
 graph = StateGraph(State)
@@ -145,20 +147,26 @@ graph.add_edge("LR", END)
 app = graph.compile()
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage: python main.py <video_or_url> [label_0_or_1]")
+    parser = argparse.ArgumentParser(description="Fake Video Detection Engine")
+    parser.add_argument("input_path", help="Path to video file or URL")
+    parser.add_argument("label", nargs="?", type=int, help="Optional label (0 or 1)")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    
+    args = parser.parse_args()
+
+    if args.label is not None and args.label not in [0, 1]:
+        print("Label must be 0 or 1 if provided.")
         sys.exit(1)
 
-    input_path = sys.argv[1]
-    state = {"input_path": input_path}
+    state = {
+        "input_path": args.input_path,
+        "debug": args.debug
+    }
+    
+    if args.label is not None:
+        state["label"] = args.label
 
-    if len(sys.argv) >= 3:
-        try:
-            state["label"] = int(sys.argv[2])
-        except ValueError:
-            print("Label must be 0 or 1 if provided.")
-            sys.exit(1)
-
+    print(f"Starting processing with debug={'ON' if args.debug else 'OFF'}...")
     result = app.invoke(state)
 
     fake_prob = result.get("fake_probability")

@@ -47,4 +47,10 @@ def run(state: dict) -> dict:
         print(f"Error in A2 node: {e}")
         raise e
 
+    if state.get("debug", False):
+        print(f"[DEBUG] A2: Transcription Model: openai-whisper-base")
+        print(f"[DEBUG] A2: Device: {device}")
+        print(f"[DEBUG] A2: Word Count: {state.get('word_count')}")
+        print(f"[DEBUG] A2: Segments: {len(state.get('segments', []))}")
+
     return state
