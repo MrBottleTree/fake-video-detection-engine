@@ -8,5 +8,6 @@ dependencies = [
     "langgraph>=1.0.3",
     "moviepy>=2.2.1",
     "numpy>=2.3.5",
+    "scipy>=1.16.3",
     "yt-dlp>=2025.11.12",
 ]
