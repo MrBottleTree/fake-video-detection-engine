@@ -37,6 +37,8 @@ def in_node(state: State) -> State:
             'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
+            'quiet': True,
+            'no_warnings': True,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(input_path, download=True)
