@@ -4,23 +4,22 @@ import numpy as np
 
 def run(state: dict) -> dict:
     print("Node V1: Extracting keyframes and tracking faces...")
-    video_path = state.get("video_path")
+    output_dir = state.get("data_dir")
     debug = state.get("debug", False)
     
-    if not video_path or not os.path.exists(video_path):
-        print(f"Error: Video file not found at {video_path}")
+    if not output_dir or not os.path.exists(output_dir):
+        print(f"Error: Data directory not found at {output_dir}")
         return state
 
     try:
-        output_dir = os.path.dirname(video_path)
         keyframes_dir = os.path.join(output_dir, "keyframes")
         faces_dir = os.path.join(output_dir, "faces")
         os.makedirs(keyframes_dir, exist_ok=True)
         os.makedirs(faces_dir, exist_ok=True)
 
-        cap = cv2.VideoCapture(video_path)
+        cap = cv2.VideoCapture(os.path.join(output_dir, "video.mp4"))
         if not cap.isOpened():
-            raise IOError(f"Cannot open video file {video_path}")
+            raise IOError(f"Cannot open video file {os.path.join(output_dir, "video.mp4")}")
 
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
