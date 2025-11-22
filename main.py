@@ -34,6 +34,9 @@ class State(TypedDict):
     keyframes: Annotated[Optional[list], overwrite]
     face_detections: Annotated[Optional[list], overwrite]
     ocr_results: Annotated[Optional[list], overwrite]
+    
+    mouth_landmarks: Annotated[Optional[list], overwrite]
+    mouth_landmarks_viz_path: Annotated[Optional[str], overwrite]
 
 def in_node(state: State) -> State:
     input_path = state["input_path"]
@@ -48,46 +51,62 @@ def in_node(state: State) -> State:
     if input_path.startswith("http://") or input_path.startswith("https://"):
         print(f"Downloading video from URL: {input_path}")
         
-        cookies_path = "cookies.txt"
-        if os.path.exists(cookies_path):
-            print(f"Using cookies from {cookies_path}")
-        else:
-            cookies_path = None
-            print("No cookies.txt found. If download fails, export cookies from your browser to cookies.txt")
-
-        ydl_opts = {
-            'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
-            'quiet': not debug,
-            'no_warnings': not debug,
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['default', 'ios', 'android', 'web'],
-                    'player_skip': ['webpage', 'configs', 'js'],
-                }
-            },
-            'retry_sleep_functions': {'http': lambda n: 5},
-        }
+        max_retries = 3
+        retry_count = 0
+        success = False
         
-        if cookies_path:
-            ydl_opts['cookiefile'] = cookies_path
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        while retry_count < max_retries and not success:
             try:
-                info = ydl.extract_info(input_path, download=True)
-            except yt_dlp.utils.DownloadError as e:
-                print(f"Download failed: {e}")
-                print("Try uploading a 'cookies.txt' file to the project root.")
-                raise e
+                cookies_path = "cookies.txt"
+                use_cookies_txt = os.path.exists(cookies_path)
                 
-            video_path = ydl.prepare_filename(info)
-            metadata = {
-                "title": info.get("title"),
-                "duration": info.get("duration"),
-                "uploader": info.get("uploader"),
-                "original_url": input_path
-            }
+                ydl_opts = {
+                    'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
+                    'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                    'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
+                    'quiet': not debug,
+                    'no_warnings': not debug,
+                    'sleep_interval': 2,
+                    'max_sleep_interval': 5,
+                    'sleep_interval_requests': 1,
+                    'extractor_args': {
+                        'youtube': {
+                            'player_client': ['default', 'ios', 'android', 'web'],
+                            'player_skip': ['webpage', 'configs', 'js'],
+                        }
+                    },
+                    'retry_sleep_functions': {'http': lambda n: 5},
+                }
+                
+                if use_cookies_txt:
+                    print(f"Using cookies from {cookies_path}")
+                    ydl_opts['cookiefile'] = cookies_path
+                else:
+                    print("No cookies.txt found. Using browser simulation (extractor_args).")
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(input_path, download=True)
+                    video_path = ydl.prepare_filename(info)
+                    metadata = {
+                        "title": info.get("title"),
+                        "duration": info.get("duration"),
+                        "uploader": info.get("uploader"),
+                        "original_url": input_path
+                    }
+                    success = True
+                    
+            except yt_dlp.utils.DownloadError as e:
+                retry_count += 1
+                print(f"Download attempt {retry_count} failed: {e}")
+                if retry_count < max_retries:
+                    import time
+                    wait_time = retry_count * 5
+                    print(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    print("All download attempts failed.")
+                    print("Tip: For EC2, upload a 'cookies.txt' file to the project root.")
+                    raise e
     else:
         print(f"Processing local file: {input_path}")
         if not os.path.exists(input_path):
@@ -204,7 +223,8 @@ def main() -> None:
     result = app.invoke(state)
 
     fake_prob = result.get("fake_probability")
-    print("Final state:", result)
+    if args.debug:
+        print("Final state:", result)
     print("Fake probability:", fake_prob)
 
 
