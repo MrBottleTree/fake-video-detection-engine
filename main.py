@@ -37,6 +37,10 @@ class State(TypedDict):
     
     mouth_landmarks: Annotated[Optional[list], overwrite]
     mouth_landmarks_viz_path: Annotated[Optional[str], overwrite]
+    
+    blink_data: Annotated[Optional[list], overwrite]
+    head_pose_data: Annotated[Optional[list], overwrite]
+    headpose_viz_path: Annotated[Optional[str], overwrite]
 
 def in_node(state: State) -> State:
     input_path = state["input_path"]
@@ -98,14 +102,23 @@ def in_node(state: State) -> State:
             except yt_dlp.utils.DownloadError as e:
                 retry_count += 1
                 print(f"Download attempt {retry_count} failed: {e}")
+                
                 if retry_count < max_retries:
                     import time
                     wait_time = retry_count * 5
                     print(f"Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
+                    
+                    if retry_count == max_retries - 1:
+                        print("\n[ESCALATION] Standard download failed. Attempting OAuth2 authentication...")
+                        print("Please watch the console for a Google Device Code.")
+                        print("You will need to visit google.com/device and enter the code.")
+                        ydl_opts['username'] = 'oauth2'
+                        ydl_opts['password'] = ''
                 else:
                     print("All download attempts failed.")
-                    print("Tip: For EC2, upload a 'cookies.txt' file to the project root.")
+                    print("CRITICAL TIP FOR EC2: Upload a 'cookies.txt' file to the project root.")
+                    print("Alternatively, use the OAuth2 flow if prompted above.")
                     raise e
     else:
         print(f"Processing local file: {input_path}")
