@@ -1,7 +1,7 @@
 [project]
 name = "agenticai-lang-graph"
 version = "0.1.0"
-description = "Add your description here"
+description = "Agentic AI Lang Graph"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -10,6 +10,7 @@ dependencies = [
     "moviepy>=2.2.1",
     "numpy>=2.3.5",
     "openai-whisper>=20250625",
+    "opencv-python>=4.11.0.86",
     "scipy>=1.16.3",
     "yt-dlp>=2025.11.12",
 ]
