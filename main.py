@@ -10,6 +10,9 @@ from moviepy import VideoFileClip
 import imageio_ffmpeg
 from typing import Optional, Dict, Any, TypedDict, Annotated
 import operator
+import warnings
+warnings.filterwarnings("ignore", message=".*'pin_memory' argument is set as true.*")
+
 
 def overwrite(left, right):
     return right
@@ -17,11 +20,20 @@ def overwrite(left, right):
 class State(TypedDict):
     input_path: Annotated[str, overwrite]
     label: Annotated[Optional[int], overwrite]
-    video_path: Annotated[Optional[str], overwrite]
-    audio_path: Annotated[Optional[str], overwrite]
+    data_dir: Annotated[Optional[str], overwrite]
     metadata: Annotated[Optional[Dict[str, Any]], overwrite]
     fake_probability: Annotated[Optional[float], overwrite]
     debug: Annotated[bool, overwrite]
+    
+    transcript: Annotated[Optional[str], overwrite]
+    segments: Annotated[Optional[list], overwrite]
+    word_count: Annotated[Optional[int], overwrite]
+    audio_onsets: Annotated[Optional[list], overwrite]
+    onset_count: Annotated[Optional[int], overwrite]
+    
+    keyframes: Annotated[Optional[list], overwrite]
+    face_detections: Annotated[Optional[list], overwrite]
+    ocr_results: Annotated[Optional[list], overwrite]
 
 def in_node(state: State) -> State:
     input_path = state["input_path"]
@@ -31,7 +43,6 @@ def in_node(state: State) -> State:
     output_dir = os.path.join("processed", f"video_{timestamp}")
     os.makedirs(output_dir, exist_ok=True)
     
-    video_path = ""
     metadata = {}
 
     if input_path.startswith("http://") or input_path.startswith("https://"):
@@ -57,10 +68,11 @@ def in_node(state: State) -> State:
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input file not found: {input_path}")
         
-        filename = os.path.basename(input_path)
-        video_path = os.path.join(output_dir, filename)
+        # Always save as video.mp4 for consistency with URL downloads
+        video_path = os.path.join(output_dir, "video.mp4")
         shutil.copy2(input_path, video_path)
         metadata = {"original_path": input_path}
+
 
     print(f"Extracting audio from: {video_path}")
     try:
@@ -86,13 +98,11 @@ def in_node(state: State) -> State:
         raise e
 
     print(f"Processing complete. Video: {video_path}, Audio: {audio_path}")
-    
-    return {
-        "video_path": video_path,
-        "audio_path": audio_path,
-        "metadata": metadata,
-        "debug": debug
-    }
+
+    state["data_dir"] = output_dir
+    state["metadata"] = metadata
+    state["debug"] = debug
+    return state
 
 graph = StateGraph(State)
 
