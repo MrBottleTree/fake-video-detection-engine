@@ -68,7 +68,6 @@ def in_node(state: State) -> State:
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"Input file not found: {input_path}")
         
-        # Always save as video.mp4 for consistency with URL downloads
         video_path = os.path.join(output_dir, "video.mp4")
         shutil.copy2(input_path, video_path)
         metadata = {"original_path": input_path}
