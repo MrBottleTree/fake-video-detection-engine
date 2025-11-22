@@ -4,7 +4,7 @@ import numpy as np
 
 def run(state: dict) -> dict:
     print("Node A3: Detecting audio onsets...")
-    audio_path = state.get("audio_path")
+    audio_path = os.path.join(state.get("data_dir"), "audio_16k.wav")
     
     if not audio_path or not os.path.exists(audio_path):
         print(f"Error: Audio file not found at {audio_path}")
