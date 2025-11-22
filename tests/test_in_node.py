@@ -29,10 +29,10 @@ class TestInNode(unittest.TestCase):
         state = State(input_path=os.path.abspath(self.test_video))
         
         new_state = in_node(state)
-        parent_dir = os.path.dirname(new_state["data_dir"])
+        test_dir = new_state["data_dir"]
         
-        if parent_dir not in self.created_dirs:
-            self.created_dirs.append(parent_dir)
+        if test_dir not in self.created_dirs:
+            self.created_dirs.append(test_dir)
 
         self.assertIsNotNone(new_state.get("data_dir"))
         self.assertTrue(os.path.exists(os.path.join(new_state["data_dir"], "video.mp4")))
