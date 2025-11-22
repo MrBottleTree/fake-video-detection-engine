@@ -47,15 +47,40 @@ def in_node(state: State) -> State:
 
     if input_path.startswith("http://") or input_path.startswith("https://"):
         print(f"Downloading video from URL: {input_path}")
+        
+        cookies_path = "cookies.txt"
+        if os.path.exists(cookies_path):
+            print(f"Using cookies from {cookies_path}")
+        else:
+            cookies_path = None
+            print("No cookies.txt found. If download fails, export cookies from your browser to cookies.txt")
+
         ydl_opts = {
             'outtmpl': os.path.join(output_dir, 'video.%(ext)s'),
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'ffmpeg_location': imageio_ffmpeg.get_ffmpeg_exe(),
             'quiet': not debug,
             'no_warnings': not debug,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['default', 'ios', 'android', 'web'],
+                    'player_skip': ['webpage', 'configs', 'js'],
+                }
+            },
+            'retry_sleep_functions': {'http': lambda n: 5},
         }
+        
+        if cookies_path:
+            ydl_opts['cookiefile'] = cookies_path
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(input_path, download=True)
+            try:
+                info = ydl.extract_info(input_path, download=True)
+            except yt_dlp.utils.DownloadError as e:
+                print(f"Download failed: {e}")
+                print("Try uploading a 'cookies.txt' file to the project root.")
+                raise e
+                
             video_path = ydl.prepare_filename(info)
             metadata = {
                 "title": info.get("title"),

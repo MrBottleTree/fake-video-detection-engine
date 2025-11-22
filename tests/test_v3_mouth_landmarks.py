@@ -8,7 +8,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nodes.V_nodes import v3_mouth_landmarks_timeseries
 
+import face_alignment
+
 class TestV3MouthLandmarks(unittest.TestCase):
+    # ... (existing code)
+
     def setUp(self):
         self.test_dir = "test_v3_landmarks"
         os.makedirs(self.test_dir, exist_ok=True)
@@ -22,56 +26,45 @@ class TestV3MouthLandmarks(unittest.TestCase):
             shutil.rmtree(self.test_dir)
 
     @patch("cv2.VideoCapture")
-    @patch("cv2.dnn.readNetFromCaffe")
-    @patch("cv2.face.createFacemarkLBF", create=True)
-    @patch("urllib.request.urlretrieve")
+    @patch("face_alignment.FaceAlignment")
+    @patch("torch.cuda.is_available")
     @patch("cv2.VideoWriter")
-    def test_landmark_extraction(self, mock_VideoWriter, mock_urlretrieve, mock_createFacemark, mock_readNet, mock_VideoCapture):
-        print("\nTesting landmark extraction...")
+    def test_landmark_extraction(self, mock_VideoWriter, mock_cuda_available, mock_FaceAlignment, mock_VideoCapture):
+        print("\nTesting landmark extraction with Face Alignment...")
         
+        # Mock CUDA availability
+        mock_cuda_available.return_value = True
+        
+        # Mock VideoCapture
         mock_cap = MagicMock()
         mock_VideoCapture.return_value = mock_cap
         mock_cap.isOpened.return_value = True
         mock_cap.get.side_effect = lambda prop: {
-            5: 30.0,
-            7: 10.0,
-            3: 640.0,
-            4: 480.0
+            5: 30.0, # FPS
+            3: 640.0, # Width
+            4: 480.0  # Height
         }.get(prop, 0.0)
         
         dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
         mock_cap.read.side_effect = [(True, dummy_frame), (False, None)]
         
-        mock_net = MagicMock()
-        mock_readNet.return_value = mock_net
-        mock_detections = np.zeros((1, 1, 2, 7), dtype=np.float32)
-        mock_detections[0, 0, 0, 2] = 0.9
-        mock_detections[0, 0, 0, 3] = 0.1
-        mock_detections[0, 0, 0, 4] = 0.1
-        mock_detections[0, 0, 0, 5] = 0.2
-        mock_detections[0, 0, 0, 6] = 0.2
+        # Mock FaceAlignment instance
+        mock_fa_instance = MagicMock()
+        mock_FaceAlignment.return_value = mock_fa_instance
         
-        mock_detections[0, 0, 1, 2] = 0.8
-        mock_detections[0, 0, 1, 3] = 0.5
-        mock_detections[0, 0, 1, 4] = 0.5
-        mock_detections[0, 0, 1, 5] = 0.6
-        mock_detections[0, 0, 1, 6] = 0.6
+        # Mock landmarks: List of arrays (one per face), each (68, 2)
+        landmarks1 = np.zeros((68, 2), dtype=np.float32)
+        landmarks1[48:68, :] = 10.0
+        landmarks1[62] = [10, 10] # Top lip
+        landmarks1[66] = [10, 20] # Bottom lip (Dist 10)
         
-        mock_net.forward.return_value = mock_detections
+        landmarks2 = np.zeros((68, 2), dtype=np.float32)
+        landmarks2[48:68, :] = 50.0
+        landmarks2[62] = [50, 50] # Top lip
+        landmarks2[66] = [50, 80] # Bottom lip (Dist 30)
         
-        mock_facemark = MagicMock()
-        mock_createFacemark.return_value = mock_facemark
-        
-        landmarks1 = np.zeros((1, 68, 2), dtype=np.float32)
-        landmarks1[0, 48:68, :] = 10.0
-        landmarks1[0, 62] = [10, 10]
-        landmarks1[0, 66] = [10, 20]
-        
-        landmarks2 = np.zeros((1, 68, 2), dtype=np.float32)
-        landmarks2[0, 48:68, :] = 50.0
-        landmarks2[0, 62] = [50, 50]
-        landmarks2[0, 66] = [50, 80]
-        mock_facemark.fit.side_effect = [(True, [landmarks1]), (True, [landmarks2])]
+        # Return two faces for the first frame
+        mock_fa_instance.get_landmarks.side_effect = [[landmarks1, landmarks2]]
         
         state = {
             "data_dir": self.test_dir,
@@ -80,14 +73,18 @@ class TestV3MouthLandmarks(unittest.TestCase):
         
         new_state = v3_mouth_landmarks_timeseries.run(state)
         
+        # Verify initialization
+        mock_FaceAlignment.assert_called_with(face_alignment.LandmarksType.TWO_D, device='cuda', face_detector='sfd')
+        
         self.assertIn("mouth_landmarks", new_state)
         self.assertIn("mouth_landmarks_viz_path", new_state)
         landmarks_data = new_state["mouth_landmarks"]
         self.assertEqual(len(landmarks_data), 1)
         
+        # Verify selection of best face (max lip distance)
         stored_landmarks = landmarks_data[0]["landmarks"]
         self.assertTrue(len(stored_landmarks) > 0)
-        top_lip_stored = stored_landmarks[14]
+        top_lip_stored = stored_landmarks[14] # Index 14 in 48-67 subset corresponds to 62 in 68-point
         self.assertEqual(top_lip_stored, [50.0, 50.0])
         
         print("Landmark extraction test passed.")
