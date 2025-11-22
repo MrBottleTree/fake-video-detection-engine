@@ -2,13 +2,17 @@ import unittest
 import os
 import sys
 import numpy as np
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nodes.V_nodes import v3_mouth_landmarks_timeseries
 
+import face_alignment
+
 class TestV3MouthLandmarks(unittest.TestCase):
+    # ... (existing code)
+
     def setUp(self):
         self.test_dir = "test_v3_landmarks"
         os.makedirs(self.test_dir, exist_ok=True)
@@ -22,71 +26,45 @@ class TestV3MouthLandmarks(unittest.TestCase):
             shutil.rmtree(self.test_dir)
 
     @patch("cv2.VideoCapture")
+    @patch("face_alignment.FaceAlignment")
+    @patch("torch.cuda.is_available")
     @patch("cv2.VideoWriter")
-    @patch("mediapipe.solutions.drawing_utils.draw_landmarks")
-    @patch("mediapipe.solutions.face_mesh.FaceMesh")
-    def test_landmark_extraction(self, mock_FaceMesh, mock_draw_landmarks, mock_VideoWriter, mock_VideoCapture):
-        print("\nTesting MediaPipe landmark extraction...")
+    def test_landmark_extraction(self, mock_VideoWriter, mock_cuda_available, mock_FaceAlignment, mock_VideoCapture):
+        print("\nTesting landmark extraction with Face Alignment...")
         
+        # Mock CUDA availability
+        mock_cuda_available.return_value = True
+        
+        # Mock VideoCapture
         mock_cap = MagicMock()
         mock_VideoCapture.return_value = mock_cap
         mock_cap.isOpened.return_value = True
         mock_cap.get.side_effect = lambda prop: {
-            5: 30.0,
-            7: 10.0,
-            3: 640.0,
-            4: 480.0
+            5: 30.0, # FPS
+            3: 640.0, # Width
+            4: 480.0  # Height
         }.get(prop, 0.0)
         
         dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
         mock_cap.read.side_effect = [(True, dummy_frame), (False, None)]
         
-        mock_face_mesh_instance = MagicMock()
-        mock_FaceMesh.return_value = mock_face_mesh_instance
+        # Mock FaceAlignment instance
+        mock_fa_instance = MagicMock()
+        mock_FaceAlignment.return_value = mock_fa_instance
         
-        mock_face1 = MagicMock()
-        mock_landmarks1 = []
-        for i in range(478):
-            mock_landmark = MagicMock()
-            if i == 13:
-                mock_landmark.x = 0.5
-                mock_landmark.y = 0.4
-            elif i == 14:
-                mock_landmark.x = 0.5
-                mock_landmark.y = 0.45
-            else:
-                mock_landmark.x = 0.5
-                mock_landmark.y = 0.5
-            mock_landmark.z = 0.0
-            mock_landmark.visibility = 1.0
-            mock_landmark.presence = 1.0
-            mock_landmarks1.append(mock_landmark)
+        # Mock landmarks: List of arrays (one per face), each (68, 2)
+        landmarks1 = np.zeros((68, 2), dtype=np.float32)
+        landmarks1[48:68, :] = 10.0
+        landmarks1[62] = [10, 10] # Top lip
+        landmarks1[66] = [10, 20] # Bottom lip (Dist 10)
         
-        type(mock_face1).landmark = PropertyMock(return_value=mock_landmarks1)
+        landmarks2 = np.zeros((68, 2), dtype=np.float32)
+        landmarks2[48:68, :] = 50.0
+        landmarks2[62] = [50, 50] # Top lip
+        landmarks2[66] = [50, 80] # Bottom lip (Dist 30)
         
-        mock_face2 = MagicMock()
-        mock_landmarks2 = []
-        for i in range(478):
-            mock_landmark = MagicMock()
-            if i == 13:
-                mock_landmark.x = 0.5
-                mock_landmark.y = 0.3
-            elif i == 14:
-                mock_landmark.x = 0.5
-                mock_landmark.y = 0.5
-            else:
-                mock_landmark.x = 0.5
-                mock_landmark.y = 0.5
-            mock_landmark.z = 0.0
-            mock_landmark.visibility = 1.0
-            mock_landmark.presence = 1.0
-            mock_landmarks2.append(mock_landmark)
-        
-        type(mock_face2).landmark = PropertyMock(return_value=mock_landmarks2)
-        
-        mock_results = MagicMock()
-        mock_results.multi_face_landmarks = [mock_face1, mock_face2]
-        mock_face_mesh_instance.process.return_value = mock_results
+        # Return two faces for the first frame
+        mock_fa_instance.get_landmarks.side_effect = [[landmarks1, landmarks2]]
         
         state = {
             "data_dir": self.test_dir,
@@ -95,21 +73,21 @@ class TestV3MouthLandmarks(unittest.TestCase):
         
         new_state = v3_mouth_landmarks_timeseries.run(state)
         
+        # Verify initialization
+        mock_FaceAlignment.assert_called_with(face_alignment.LandmarksType.TWO_D, device='cuda', face_detector='sfd')
+        
         self.assertIn("mouth_landmarks", new_state)
         self.assertIn("mouth_landmarks_viz_path", new_state)
-        
         landmarks_data = new_state["mouth_landmarks"]
         self.assertEqual(len(landmarks_data), 1)
         
-        frame_data = landmarks_data[0]
-        self.assertGreater(frame_data["lip_distance"], 90)
-        self.assertLess(frame_data["lip_distance"], 100)
+        # Verify selection of best face (max lip distance)
+        stored_landmarks = landmarks_data[0]["landmarks"]
+        self.assertTrue(len(stored_landmarks) > 0)
+        top_lip_stored = stored_landmarks[14] # Index 14 in 48-67 subset corresponds to 62 in 68-point
+        self.assertEqual(top_lip_stored, [50.0, 50.0])
         
-        self.assertTrue(len(frame_data["landmarks"]) > 0)
-        self.assertEqual(new_state["metadata"]["landmark_model"], "mediapipe_face_mesh")
-        self.assertEqual(new_state["metadata"]["landmark_count"], 40)
-        
-        print("MediaPipe landmark extraction test passed.")
+        print("Landmark extraction test passed.")
 
     def test_missing_video(self):
         print("\nTesting missing video...")
