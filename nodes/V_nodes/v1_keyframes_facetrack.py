@@ -53,6 +53,26 @@ def run(state: dict) -> dict:
 
         net = cv2.dnn.readNetFromCaffe(prototxt_path, model_path)
         
+        # Attempt to use CUDA
+        try:
+            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+            
+            # Run a dummy forward pass to check if CUDA works
+            dummy_blob = np.zeros((1, 3, 300, 300), dtype=np.float32)
+            net.setInput(dummy_blob)
+            net.forward()
+            
+            if debug:
+                print("[DEBUG] V1: CUDA backend successfully initialized.")
+        except Exception as e:
+            if debug:
+                print(f"[DEBUG] V1: CUDA backend failed ({e}), falling back to CPU.")
+            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_DEFAULT)
+            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+
+            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+
         keyframes_paths = []
         face_detections = []
         
