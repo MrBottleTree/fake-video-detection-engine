@@ -2,7 +2,7 @@ import unittest
 import os
 import sys
 import numpy as np
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, PropertyMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -22,12 +22,11 @@ class TestV3MouthLandmarks(unittest.TestCase):
             shutil.rmtree(self.test_dir)
 
     @patch("cv2.VideoCapture")
-    @patch("cv2.dnn.readNetFromCaffe")
-    @patch("cv2.face.createFacemarkLBF", create=True)
-    @patch("urllib.request.urlretrieve")
     @patch("cv2.VideoWriter")
-    def test_landmark_extraction(self, mock_VideoWriter, mock_urlretrieve, mock_createFacemark, mock_readNet, mock_VideoCapture):
-        print("\nTesting landmark extraction...")
+    @patch("mediapipe.solutions.drawing_utils.draw_landmarks")
+    @patch("mediapipe.solutions.face_mesh.FaceMesh")
+    def test_landmark_extraction(self, mock_FaceMesh, mock_draw_landmarks, mock_VideoWriter, mock_VideoCapture):
+        print("\nTesting MediaPipe landmark extraction...")
         
         mock_cap = MagicMock()
         mock_VideoCapture.return_value = mock_cap
@@ -42,36 +41,52 @@ class TestV3MouthLandmarks(unittest.TestCase):
         dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)
         mock_cap.read.side_effect = [(True, dummy_frame), (False, None)]
         
-        mock_net = MagicMock()
-        mock_readNet.return_value = mock_net
-        mock_detections = np.zeros((1, 1, 2, 7), dtype=np.float32)
-        mock_detections[0, 0, 0, 2] = 0.9
-        mock_detections[0, 0, 0, 3] = 0.1
-        mock_detections[0, 0, 0, 4] = 0.1
-        mock_detections[0, 0, 0, 5] = 0.2
-        mock_detections[0, 0, 0, 6] = 0.2
+        mock_face_mesh_instance = MagicMock()
+        mock_FaceMesh.return_value = mock_face_mesh_instance
         
-        mock_detections[0, 0, 1, 2] = 0.8
-        mock_detections[0, 0, 1, 3] = 0.5
-        mock_detections[0, 0, 1, 4] = 0.5
-        mock_detections[0, 0, 1, 5] = 0.6
-        mock_detections[0, 0, 1, 6] = 0.6
+        mock_face1 = MagicMock()
+        mock_landmarks1 = []
+        for i in range(478):
+            mock_landmark = MagicMock()
+            if i == 13:
+                mock_landmark.x = 0.5
+                mock_landmark.y = 0.4
+            elif i == 14:
+                mock_landmark.x = 0.5
+                mock_landmark.y = 0.45
+            else:
+                mock_landmark.x = 0.5
+                mock_landmark.y = 0.5
+            mock_landmark.z = 0.0
+            mock_landmark.visibility = 1.0
+            mock_landmark.presence = 1.0
+            mock_landmarks1.append(mock_landmark)
         
-        mock_net.forward.return_value = mock_detections
+        type(mock_face1).landmark = PropertyMock(return_value=mock_landmarks1)
         
-        mock_facemark = MagicMock()
-        mock_createFacemark.return_value = mock_facemark
+        mock_face2 = MagicMock()
+        mock_landmarks2 = []
+        for i in range(478):
+            mock_landmark = MagicMock()
+            if i == 13:
+                mock_landmark.x = 0.5
+                mock_landmark.y = 0.3
+            elif i == 14:
+                mock_landmark.x = 0.5
+                mock_landmark.y = 0.5
+            else:
+                mock_landmark.x = 0.5
+                mock_landmark.y = 0.5
+            mock_landmark.z = 0.0
+            mock_landmark.visibility = 1.0
+            mock_landmark.presence = 1.0
+            mock_landmarks2.append(mock_landmark)
         
-        landmarks1 = np.zeros((1, 68, 2), dtype=np.float32)
-        landmarks1[0, 48:68, :] = 10.0
-        landmarks1[0, 62] = [10, 10]
-        landmarks1[0, 66] = [10, 20]
+        type(mock_face2).landmark = PropertyMock(return_value=mock_landmarks2)
         
-        landmarks2 = np.zeros((1, 68, 2), dtype=np.float32)
-        landmarks2[0, 48:68, :] = 50.0
-        landmarks2[0, 62] = [50, 50]
-        landmarks2[0, 66] = [50, 80]
-        mock_facemark.fit.side_effect = [(True, [landmarks1]), (True, [landmarks2])]
+        mock_results = MagicMock()
+        mock_results.multi_face_landmarks = [mock_face1, mock_face2]
+        mock_face_mesh_instance.process.return_value = mock_results
         
         state = {
             "data_dir": self.test_dir,
@@ -82,15 +97,19 @@ class TestV3MouthLandmarks(unittest.TestCase):
         
         self.assertIn("mouth_landmarks", new_state)
         self.assertIn("mouth_landmarks_viz_path", new_state)
+        
         landmarks_data = new_state["mouth_landmarks"]
         self.assertEqual(len(landmarks_data), 1)
         
-        stored_landmarks = landmarks_data[0]["landmarks"]
-        self.assertTrue(len(stored_landmarks) > 0)
-        top_lip_stored = stored_landmarks[14]
-        self.assertEqual(top_lip_stored, [50.0, 50.0])
+        frame_data = landmarks_data[0]
+        self.assertGreater(frame_data["lip_distance"], 90)
+        self.assertLess(frame_data["lip_distance"], 100)
         
-        print("Landmark extraction test passed.")
+        self.assertTrue(len(frame_data["landmarks"]) > 0)
+        self.assertEqual(new_state["metadata"]["landmark_model"], "mediapipe_face_mesh")
+        self.assertEqual(new_state["metadata"]["landmark_count"], 40)
+        
+        print("MediaPipe landmark extraction test passed.")
 
     def test_missing_video(self):
         print("\nTesting missing video...")

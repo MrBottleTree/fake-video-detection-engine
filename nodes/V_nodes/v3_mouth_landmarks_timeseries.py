@@ -1,7 +1,7 @@
 import cv2
 import os
 import numpy as np
-import urllib.request
+import mediapipe as mp
 
 def run(state: dict) -> dict:
     print("Node V3: Extracting mouth landmarks (Time-series)...")
@@ -18,58 +18,21 @@ def run(state: dict) -> dict:
         return state
 
     try:
-        model_dir = "models"
-        os.makedirs(model_dir, exist_ok=True)
+        mp_face_mesh = mp.solutions.face_mesh
+        mp_drawing = mp.solutions.drawing_utils
+        mp_drawing_styles = mp.solutions.drawing_styles
         
-        prototxt_path = os.path.join(model_dir, "deploy.prototxt")
-        model_path = os.path.join(model_dir, "res10_300x300_ssd_iter_140000.caffemodel")
-        
-        lbfgs_path = os.path.join(model_dir, "lbfmodel.yaml")
-
-        def download_model_file(url, path):
-            if not os.path.exists(path):
-                print(f"Downloading {os.path.basename(path)}...")
-                try:
-                    urllib.request.urlretrieve(url, path)
-                    print(f"Downloaded {path}")
-                except Exception as e:
-                    print(f"Failed to download {url}: {e}")
-                    raise e
-
-        download_model_file(
-            "https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt",
-            prototxt_path
-        )
-        download_model_file(
-            "https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
-            model_path
+        face_mesh = mp_face_mesh.FaceMesh(
+            static_image_mode=False,
+            max_num_faces=5,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
         )
         
-        download_model_file(
-            "https://raw.githubusercontent.com/kurnianggoro/GSOC2017/master/data/lbfmodel.yaml",
-            lbfgs_path
-        )
-
-        net = cv2.dnn.readNetFromCaffe(prototxt_path, model_path)
-        
-        try:
-            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-            
-            dummy_blob = np.zeros((1, 3, 300, 300), dtype=np.float32)
-            net.setInput(dummy_blob)
-            net.forward()
-            
-            if debug:
-                print("[DEBUG] V3: CUDA backend successfully initialized.")
-        except Exception as e:
-            if debug:
-                print(f"[DEBUG] V3: CUDA backend failed ({e}), falling back to CPU.")
-            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_DEFAULT)
-            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-
-        facemark = cv2.face.createFacemarkLBF()
-        facemark.loadModel(lbfgs_path)
+        if debug:
+            print("[DEBUG] V3: MediaPipe Face Mesh initialized with GPU acceleration")
+            print("[DEBUG] V3: Refine landmarks enabled for enhanced lip tracking")
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -80,113 +43,104 @@ def run(state: dict) -> dict:
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
+        if debug:
+            print(f"[DEBUG] V3: Video FPS: {fps}, Size: {frame_width}x{frame_height}, Frames: {total_frames}")
+        
         viz_path = os.path.join(output_dir, "landmarks_viz.mp4")
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         viz_writer = cv2.VideoWriter(viz_path, fourcc, fps, (frame_width, frame_height))
         
         mouth_landmarks_data = []
-        
         frame_count = 0
+        
+        UPPER_LIP_CENTER = 13
+        LOWER_LIP_CENTER = 14
+        
+        MOUTH_LANDMARKS = [
+            61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185,
+            78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95
+        ]
         
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
             
-            blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0,
-                                         (300, 300), (104.0, 177.0, 123.0))
-            net.setInput(blob)
-            detections = net.forward()
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            faces = []
-            for i in range(detections.shape[2]):
-                confidence = detections[0, 0, i, 2]
-                if confidence < 0.5:
-                    continue
-                
-                box = detections[0, 0, i, 3:7] * np.array([frame_width, frame_height, frame_width, frame_height])
-                (startX, startY, endX, endY) = box.astype("int")
-                
-                startX = max(0, startX)
-                startY = max(0, startY)
-                endX = min(frame_width, endX)
-                endY = min(frame_height, endY)
-                
-                w = endX - startX
-                h = endY - startY
-                
-                if w > 0 and h > 0:
-                    faces.append((startX, startY, w, h))
+            results = face_mesh.process(rgb_frame)
             
-            faces.sort(key=lambda f: f[2] * f[3], reverse=True)
-            
-            if debug and frame_count % 30 == 0:
-                print(f"[DEBUG] Frame {frame_count}: Found {len(faces)} faces.")
-
             best_face_landmarks = []
             max_lip_distance = -1.0
-            frame_landmarks = []
-
-            for face_idx, face in enumerate(faces):
-                fx, fy, fw, fh = face
-                cv2.rectangle(frame, (fx, fy), (fx + fw, fy + fh), (255, 0, 0), max(2, frame_width // 300))
+            
+            if results.multi_face_landmarks:
+                if debug and frame_count % 30 == 0:
+                    print(f"[DEBUG] V3: Frame {frame_count}: Found {len(results.multi_face_landmarks)} faces")
                 
-                faces_np = np.array([face], dtype=int) 
-                
-                success, landmarks = facemark.fit(frame, faces_np)
-                
-                if success:
-                    shape = landmarks[0]
-                    shape = np.squeeze(shape)
+                for face_idx, face_landmarks in enumerate(results.multi_face_landmarks):
+                    mp_drawing.draw_landmarks(
+                        image=frame,
+                        landmark_list=face_landmarks,
+                        connections=mp_face_mesh.FACEMESH_LIPS,
+                        landmark_drawing_spec=None,
+                        connection_drawing_spec=mp_drawing_styles.get_default_face_mesh_contours_style()
+                    )
                     
-                    if shape.shape[0] >= 68:
-                        mouth_points = shape[48:68]
+                    mouth_points = []
+                    for idx in MOUTH_LANDMARKS:
+                        landmark = face_landmarks.landmark[idx]
+                        x = int(landmark.x * frame_width)
+                        y = int(landmark.y * frame_height)
+                        mouth_points.append([x, y])
                         
-                        circle_radius = max(3, frame_width // 200)
-                        line_thickness = max(2, frame_width // 300)
-                        font_scale = max(1.0, frame_width / 1000.0)
-                        
-                        for (x, y) in mouth_points:
-                            cv2.circle(frame, (int(x), int(y)), circle_radius, (0, 255, 0), -1)
-                        
-                        if len(mouth_points) >= 20:
-                            top_lip = mouth_points[14]
-                            bottom_lip = mouth_points[18]
-                            
-                            distance = np.linalg.norm(top_lip - bottom_lip)
-                            
-                            cv2.line(frame, (int(top_lip[0]), int(top_lip[1])), 
-                                     (int(bottom_lip[0]), int(bottom_lip[1])), (0, 0, 255), line_thickness)
-                            
-                            cv2.putText(frame, f"D:{distance:.1f}", (fx, max(0, fy - 10)), 
-                                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), line_thickness)
-                            
-                            if distance > max_lip_distance:
-                                max_lip_distance = distance
-                                best_face_landmarks = mouth_points.tolist()
-
+                        cv2.circle(frame, (x, y), max(2, frame_width // 400), (0, 255, 0), -1)
+                    
+                    upper_lip = face_landmarks.landmark[UPPER_LIP_CENTER]
+                    lower_lip = face_landmarks.landmark[LOWER_LIP_CENTER]
+                    
+                    upper_lip_px = np.array([upper_lip.x * frame_width, upper_lip.y * frame_height])
+                    lower_lip_px = np.array([lower_lip.x * frame_width, lower_lip.y * frame_height])
+                    
+                    distance = np.linalg.norm(upper_lip_px - lower_lip_px)
+                    
+                    line_thickness = max(2, frame_width // 300)
+                    cv2.line(frame, 
+                            (int(upper_lip_px[0]), int(upper_lip_px[1])),
+                            (int(lower_lip_px[0]), int(lower_lip_px[1])),
+                            (0, 0, 255), line_thickness)
+                    
+                    font_scale = max(0.5, frame_width / 1000.0)
+                    cv2.putText(frame, f"D:{distance:.1f}", 
+                               (int(upper_lip_px[0]), int(upper_lip_px[1]) - 10),
+                               cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), line_thickness)
+                    
+                    if distance > max_lip_distance:
+                        max_lip_distance = distance
+                        best_face_landmarks = mouth_points
+            
             if debug and frame_count < 5 and len(best_face_landmarks) > 0:
                 debug_img_path = os.path.join(output_dir, f"debug_v3_frame_{frame_count}.jpg")
                 cv2.imwrite(debug_img_path, frame)
-                print(f"[DEBUG] Saved debug image to {debug_img_path}")
-            
-            frame_landmarks = best_face_landmarks
+                print(f"[DEBUG] V3: Saved debug image to {debug_img_path}")
+                print(f"[DEBUG] V3: Detected {len(best_face_landmarks)} mouth landmarks")
             
             viz_writer.write(frame)
             
             mouth_landmarks_data.append({
                 "frame_id": frame_count,
                 "timestamp": frame_count / fps,
-                "landmarks": frame_landmarks
+                "landmarks": best_face_landmarks,
+                "lip_distance": max_lip_distance if max_lip_distance > 0 else 0.0
             })
             
             frame_count += 1
             
             if debug and frame_count % 30 == 0:
-                print(f"[DEBUG] V3: Processed {frame_count} frames...")
+                print(f"[DEBUG] V3: Processed {frame_count}/{total_frames} frames...")
 
         cap.release()
         viz_writer.release()
+        face_mesh.close()
         
         print(f"Extracted mouth landmarks for {len(mouth_landmarks_data)} frames.")
         print(f"Visualization saved to {viz_path}")
@@ -196,7 +150,8 @@ def run(state: dict) -> dict:
         
         if "metadata" not in state:
             state["metadata"] = {}
-        state["metadata"]["landmark_model"] = "opencv_lbfgs"
+        state["metadata"]["landmark_model"] = "mediapipe_face_mesh"
+        state["metadata"]["landmark_count"] = 40
 
     except Exception as e:
         print(f"Error in V3 node: {e}")
