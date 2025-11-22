@@ -6,7 +6,7 @@ Follow this to run
 
 To run the graph:
 ```bash
-uv run main.py
+uv run main.py <url>
 ```
 
 To run the test suite:
