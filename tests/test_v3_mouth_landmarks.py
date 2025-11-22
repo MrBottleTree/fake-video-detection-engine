@@ -23,7 +23,7 @@ class TestV3MouthLandmarks(unittest.TestCase):
 
     @patch("cv2.VideoCapture")
     @patch("cv2.dnn.readNetFromCaffe")
-    @patch("cv2.face.createFacemarkLBF")
+    @patch("cv2.face.createFacemarkLBF", create=True)
     @patch("urllib.request.urlretrieve")
     @patch("cv2.VideoWriter")
     def test_landmark_extraction(self, mock_VideoWriter, mock_urlretrieve, mock_createFacemark, mock_readNet, mock_VideoCapture):
