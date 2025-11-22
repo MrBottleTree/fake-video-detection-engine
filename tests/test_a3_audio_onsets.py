@@ -13,7 +13,8 @@ class TestA3AudioOnsets(unittest.TestCase):
     def setUp(self):
         self.test_dir = "test_audio_onsets"
         os.makedirs(self.test_dir, exist_ok=True)
-        self.test_audio = os.path.join(self.test_dir, "test_onset.wav")
+        # A3 expects audio_16k.wav to exist in data_dir
+        self.test_audio = os.path.join(self.test_dir, "audio_16k.wav")
         
         # Create synthetic audio with clear onsets (beats)
         sr = 22050
@@ -41,7 +42,7 @@ class TestA3AudioOnsets(unittest.TestCase):
 
     def test_onset_detection(self):
         print("\nTesting onset detection...")
-        state = {"audio_path": self.test_audio}
+        state = {"data_dir": self.test_dir}
         
         new_state = a3_audio_onsets.run(state)
         
@@ -49,8 +50,6 @@ class TestA3AudioOnsets(unittest.TestCase):
         self.assertIsNotNone(onsets)
         self.assertTrue(len(onsets) >= 2)
         
-        # Check if we detected onsets near 0.5 and 1.5
-        # Allow some tolerance
         has_onset_1 = any(abs(o - 0.5) < 0.1 for o in onsets)
         has_onset_2 = any(abs(o - 1.5) < 0.1 for o in onsets)
         
@@ -62,7 +61,7 @@ class TestA3AudioOnsets(unittest.TestCase):
 
     def test_missing_audio(self):
         print("\nTesting missing audio file...")
-        state = {"audio_path": "non_existent.wav"}
+        state = {"data_dir": "non_existent_dir"}
         new_state = a3_audio_onsets.run(state)
         self.assertNotIn("audio_onsets", new_state)
         print("Missing audio test passed.")

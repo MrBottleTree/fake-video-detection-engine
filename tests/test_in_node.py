@@ -29,15 +29,14 @@ class TestInNode(unittest.TestCase):
         state = State(input_path=os.path.abspath(self.test_video))
         
         new_state = in_node(state)
+        parent_dir = os.path.dirname(new_state["data_dir"])
         
-        if new_state.get("video_path"):
-            parent_dir = os.path.dirname(new_state["video_path"])
-            if parent_dir not in self.created_dirs:
-                self.created_dirs.append(parent_dir)
+        if parent_dir not in self.created_dirs:
+            self.created_dirs.append(parent_dir)
 
-        self.assertIsNotNone(new_state.get("video_path"))
-        self.assertTrue(os.path.exists(new_state["video_path"]))
-        self.assertIsNone(new_state.get("audio_path"))
+        self.assertIsNotNone(new_state.get("data_dir"))
+        self.assertTrue(os.path.exists(os.path.join(new_state["data_dir"], "video.mp4")))
+        audio_path = os.path.join(new_state["data_dir"], "audio.wav")
         
         metadata = new_state.get("metadata")
         self.assertIsNotNone(metadata)
@@ -84,8 +83,7 @@ class TestInNode(unittest.TestCase):
         mock_ydl.assert_called()
         mock_ydl_instance.extract_info.assert_called_with("https://www.youtube.com/watch?v=test", download=True)
         
-        self.assertEqual(new_state["video_path"], "processed/mock_video/video.mp4")
-        self.assertIsNotNone(new_state["audio_path"])
+        self.assertIsNotNone(new_state.get("data_dir"))
         self.assertEqual(new_state["metadata"]["title"], "Test Video")
         
         print("URL ingestion test passed.")
