@@ -9,13 +9,16 @@ from nodes.A_nodes import a2_vad_asr
 
 class TestA2VadAsr(unittest.TestCase):
     def setUp(self):
-        self.test_audio = "test_audio.wav"
+        self.test_dir = "test_audio_a2"
+        os.makedirs(self.test_dir, exist_ok=True)
+        self.test_audio = os.path.join(self.test_dir, "audio_16k.wav")
         with open(self.test_audio, "w") as f:
             f.write("dummy audio content")
 
     def tearDown(self):
-        if os.path.exists(self.test_audio):
-            os.remove(self.test_audio)
+        import shutil
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
 
     @patch('nodes.A_nodes.a2_vad_asr.whisper')
     @patch('nodes.A_nodes.a2_vad_asr.torch')
@@ -36,12 +39,13 @@ class TestA2VadAsr(unittest.TestCase):
         }
         mock_model.transcribe.return_value = mock_result
         
-        state = {"audio_path": self.test_audio}
+        state = {"data_dir": self.test_dir}
         
         new_state = a2_vad_asr.run(state)
         
         mock_whisper.load_model.assert_called_with("base", device="cpu")
-        mock_model.transcribe.assert_called_with(self.test_audio)
+        called_path = mock_model.transcribe.call_args[0][0]
+        self.assertTrue(called_path.endswith("audio_16k.wav"))
         
         self.assertEqual(new_state["transcript"], "Hello world this is a test.")
         self.assertEqual(len(new_state["segments"]), 2)
@@ -52,7 +56,7 @@ class TestA2VadAsr(unittest.TestCase):
 
     def test_missing_audio(self):
         print("\nTesting missing audio file...")
-        state = {"audio_path": "non_existent.wav"}
+        state = {"data_dir": "non_existent_dir"}
         new_state = a2_vad_asr.run(state)
         self.assertNotIn("transcript", new_state)
         print("Missing audio test passed.")

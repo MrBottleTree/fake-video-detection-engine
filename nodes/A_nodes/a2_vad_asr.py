@@ -4,19 +4,17 @@ import torch
 import imageio_ffmpeg
 import warnings
 
-# Suppress FP16 warning on CPU
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
 
 def run(state: dict) -> dict:
     print("Node A2: Running VAD and ASR...")
     
-    # Ensure ffmpeg is in PATH for whisper
     ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
     ffmpeg_dir = os.path.dirname(ffmpeg_path)
     if ffmpeg_dir not in os.environ["PATH"]:
         os.environ["PATH"] += os.pathsep + ffmpeg_dir
 
-    audio_path = state.get("audio_path")
+    audio_path = os.path.join(state.get("data_dir"), "audio_16k.wav")
     
     if not audio_path or not os.path.exists(audio_path):
         print(f"Error: Audio file not found at {audio_path}")
