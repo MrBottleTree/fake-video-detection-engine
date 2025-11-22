@@ -5,16 +5,19 @@ import numpy as np
 def run(state: dict) -> dict:
     print("Node A3: Detecting audio onsets...")
     audio_path = os.path.join(state.get("data_dir"), "audio_16k.wav")
+    debug = state.get("debug", False)
     
     if not audio_path or not os.path.exists(audio_path):
         print(f"Error: Audio file not found at {audio_path}")
         return state
 
     try:
-        print(f"Loading audio from {audio_path}...")
+        if debug:
+            print(f"Loading audio from {audio_path}...")
         y, sr = librosa.load(audio_path, sr=None)
         
-        print("Detecting onsets...")
+        if debug:
+            print("Detecting onsets...")
         onset_frames = librosa.onset.onset_detect(y=y, sr=sr)
         onset_times = librosa.frames_to_time(onset_frames, sr=sr)
         
