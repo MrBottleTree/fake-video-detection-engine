@@ -4,8 +4,9 @@ import os
 def run(state: dict) -> dict:
     print("Node V2: Extracting text from keyframes (OCR)...")
     keyframes = state.get("keyframes", [])
-    print("Keyframes:", keyframes)
     debug = state.get("debug", False)
+    if debug:
+        print("Keyframes:", keyframes)
     
     if not keyframes:
         print("Warning: No keyframes found in state. Skipping OCR.")

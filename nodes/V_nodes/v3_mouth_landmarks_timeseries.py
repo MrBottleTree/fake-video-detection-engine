@@ -19,10 +19,9 @@ def run(state: dict) -> dict:
         return state
 
     try:
-        # Initialize Face Alignment
-        # 2D alignment, using CUDA if available
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        print(f"[DEBUG] V3: Using device: {device}")
+        if debug:
+            print(f"[DEBUG] V3: Using device: {device}")
         
         fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, device=device, face_detector='sfd')
 
@@ -46,12 +45,7 @@ def run(state: dict) -> dict:
             if not ret:
                 break
             
-            # Face Alignment expects RGB
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Detect landmarks
-            # get_landmarks returns a list of numpy arrays, one for each face
-            # Each array is (68, 2)
             try:
                 landmarks_list = fa.get_landmarks(frame_rgb)
             except Exception as e:
@@ -65,9 +59,6 @@ def run(state: dict) -> dict:
 
             if landmarks_list:
                 for landmarks in landmarks_list:
-                    # landmarks is (68, 2)
-                    
-                    # Calculate bounding box for visualization
                     x_min = int(np.min(landmarks[:, 0]))
                     y_min = int(np.min(landmarks[:, 1]))
                     x_max = int(np.max(landmarks[:, 0]))
@@ -76,39 +67,36 @@ def run(state: dict) -> dict:
                     w = x_max - x_min
                     h = y_max - y_min
                     
-                    # Draw bounding box (Blue)
-                    cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (255, 0, 0), max(2, frame_width // 300))
+                    if w < (frame_width * 0.05) or h < (frame_height * 0.05):
+                        if debug:
+                            print(f"[DEBUG] Frame {frame_count}: Ignored small face ({w}x{h})")
+                        continue
+                        
+                    aspect_ratio = w / h
+                    if aspect_ratio < 0.3 or aspect_ratio > 3.0:
+                        if debug:
+                            print(f"[DEBUG] Frame {frame_count}: Ignored face with weird aspect ratio ({aspect_ratio:.2f})")
+                        continue
 
-                    # Extract mouth points (48-68)
+                    cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (255, 0, 0), max(2, frame_width // 300))
                     mouth_points = landmarks[48:68]
-                    
-                    # Dynamic Scaling
                     circle_radius = max(3, frame_width // 200)
                     line_thickness = max(2, frame_width // 300)
                     font_scale = max(1.0, frame_width / 1000.0)
-                    
-                    # Draw landmarks (Green)
                     for (x, y) in mouth_points:
                         cv2.circle(frame, (int(x), int(y)), circle_radius, (0, 255, 0), -1)
-                    
-                    # Calculate lip distance
-                    # 62 is top inner lip, 66 is bottom inner lip (0-indexed from 0-67)
-                    # In 48-67 subset: 62->14, 66->18
                     if len(mouth_points) >= 20:
                         top_lip = mouth_points[14]
                         bottom_lip = mouth_points[18]
                         
                         distance = np.linalg.norm(top_lip - bottom_lip)
                         
-                        # Draw line (Red)
                         cv2.line(frame, (int(top_lip[0]), int(top_lip[1])), 
                                  (int(bottom_lip[0]), int(bottom_lip[1])), (0, 0, 255), line_thickness)
                         
-                        # Display distance
                         cv2.putText(frame, f"D:{distance:.1f}", (x_min, max(0, y_min - 10)), 
                                     cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), line_thickness)
                         
-                        # Check if this is the "best" face (widest mouth)
                         if distance > max_lip_distance:
                             max_lip_distance = distance
                             best_face_landmarks = mouth_points.tolist()
