@@ -2,3 +2,4 @@ __pycache__/
 processed
 models/
 cookies.txt
+videos/*.mp4
