@@ -12,7 +12,21 @@ def run(state: dict) -> dict:
         return state
 
     try:
-        reader = easyocr.Reader(['en'], gpu=False, verbose=debug)
+        use_gpu = False
+        try:
+            import torch
+            if torch.cuda.is_available():
+                use_gpu = True
+                if debug:
+                    print("[DEBUG] V2: CUDA available, using GPU for EasyOCR.")
+            else:
+                if debug:
+                    print("[DEBUG] V2: CUDA not available, using CPU for EasyOCR.")
+        except ImportError:
+            if debug:
+                print("[DEBUG] V2: torch not found, using CPU for EasyOCR.")
+
+        reader = easyocr.Reader(['en'], gpu=use_gpu, verbose=debug)
         
         ocr_results = []
         
