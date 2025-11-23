@@ -22,5 +22,8 @@ jobs:
       - name: Verify uv
         run: uv --version
 
+      - name: Download SpaCy model
+        run: uv run python -m spacy download en_core_web_sm
+
       - name: Run tests
         run: uv run python run_tests.py
