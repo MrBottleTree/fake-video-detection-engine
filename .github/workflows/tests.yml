@@ -2,7 +2,7 @@ name: UV Python Tests
 
 on:
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
   test:
@@ -23,7 +23,7 @@ jobs:
         run: uv --version
 
       - name: Download SpaCy model
-        run: uv run python -m spacy download en_core_web_sm
+        run: uv run python -m spacy download en_core_web_trf
 
       - name: Run tests
         run: uv run python run_tests.py

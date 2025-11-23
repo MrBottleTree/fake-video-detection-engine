@@ -13,38 +13,45 @@ nlp_model = None
 
 def get_spacy_model():
     global nlp_model
+    model_name = "en_core_web_trf"
+    
     if nlp_model is None:
         try:
             # Use GPU if available
             if torch.cuda.is_available():
                 spacy.prefer_gpu()
                 logger.info("C3: Using GPU for Spacy.")
+            else:
+                logger.info("C3: GPU not available, using CPU.")
             
-            logger.info("C3: Loading Spacy model 'en_core_web_sm'...")
-            nlp_model = spacy.load("en_core_web_sm")
+            logger.info(f"C3: Loading Spacy model '{model_name}'...")
+            nlp_model = spacy.load(model_name)
         except OSError:
-            logger.warning("C3: 'en_core_web_sm' not found. Attempting download...")
+            logger.warning(f"C3: '{model_name}' not found. Attempting download...")
             try:
                 # Use subprocess to avoid sys.exit() from spacy.cli.download
                 result = subprocess.run(
-                    [sys.executable, "-m", "spacy", "download", "en_core_web_sm"],
+                    [sys.executable, "-m", "spacy", "download", model_name],
                     capture_output=True,
                     text=True,
-                    timeout=300  # 5 minute timeout
+                    timeout=600  # 10 minute timeout for larger model
                 )
                 if result.returncode == 0:
-                    logger.info("C3: Successfully downloaded 'en_core_web_sm'.")
-                    nlp_model = spacy.load("en_core_web_sm")
+                    logger.info(f"C3: Successfully downloaded '{model_name}'.")
+                    nlp_model = spacy.load(model_name)
                 else:
-                    logger.error(f"C3: Failed to download 'en_core_web_sm': {result.stderr}. Falling back to blank model.")
-                    nlp_model = spacy.blank("en")
-                    nlp_model.add_pipe("sentencizer")
+                    logger.error(f"C3: Failed to download '{model_name}': {result.stderr}. Falling back to 'en_core_web_sm'.")
+                    try:
+                        nlp_model = spacy.load("en_core_web_sm")
+                    except OSError:
+                        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"], capture_output=True)
+                        nlp_model = spacy.load("en_core_web_sm")
             except Exception as download_error:
-                logger.error(f"C3: Failed to download 'en_core_web_sm': {download_error}. Falling back to blank model.")
+                logger.error(f"C3: Failed to download '{model_name}': {download_error}. Falling back to blank model.")
                 nlp_model = spacy.blank("en")
                 nlp_model.add_pipe("sentencizer")
         except Exception as e:
-            logger.error(f"C3: Failed to load 'en_core_web_sm': {e}. Falling back to blank model.")
+            logger.error(f"C3: Failed to load '{model_name}': {e}. Falling back to blank model.")
             nlp_model = spacy.blank("en")
             nlp_model.add_pipe("sentencizer")
             
@@ -52,39 +59,50 @@ def get_spacy_model():
 
 def is_claim_like(sent) -> bool:
     """
-    Heuristic check if a spacy Span/Doc looks like a claim.
+    Robust check if a spacy Span/Doc looks like a claim.
     Criteria:
-    - Length > 4 tokens (ignoring punct)
-    - Has a verb (if POS tags available)
+    - Length > 5 tokens (ignoring punct)
+    - Must have a Subject and a Verb (ROOT/AUX)
     - Not a question
+    - Not a fragment (must be a complete sentence)
+    - Bonus: Contains Named Entities (PERSON, ORG, GPE, DATE, EVENT)
     """
     # Filter out punctuation/space
     tokens = [t for t in sent if not t.is_punct and not t.is_space]
     
-    if len(tokens) < 4:
+    if len(tokens) < 5:
         return False
     
-    # Check if it ends with a question mark (Spacy handles this in sent.text usually, but let's check the last token)
-    if sent[-1].text == '?':
+    # Check if it ends with a question mark
+    if sent.text.strip().endswith('?'):
         return False
         
-    # POS Tag check (if model supports it)
-    if sent[0].has_vector or sent[0].pos_: # Check if model has POS capabilities
-        has_verb = any(t.pos_ == "VERB" or t.pos_ == "AUX" for t in sent)
-        if not has_verb:
+    # POS Tag and Dependency check
+    if sent[0].has_vector or sent[0].pos_: 
+        has_verb = any(t.pos_ in ["VERB", "AUX"] for t in sent)
+        has_subj = any(t.dep_ in ["nsubj", "nsubjpass", "csubj", "csubjpass"] for t in sent)
+        
+        if not (has_verb and has_subj):
             return False
+            
+    # Named Entity Check - Claims often involve entities
+    has_entity = len(sent.ents) > 0
+    
+    # If no entities, be stricter about length
+    if not has_entity and len(tokens) < 8:
+        return False
             
     return True
 
 def run(state: dict) -> dict:
     """
-    C3 Node: Claim Extraction (Robust Spacy Version)
+    C3 Node: Claim Extraction (Robust Transformer Version)
     
     Extracts claims from:
     1. Transcript (from A2)
     2. OCR Results (from V2)
     """
-    print("--- C3: Claim Extraction (Robust) ---")
+    print("--- C3: Claim Extraction (Robust Transformer) ---")
     
     transcript = state.get("transcript", "")
     ocr_results = state.get("ocr_results", [])
@@ -100,7 +118,7 @@ def run(state: dict) -> dict:
                 claims.append({
                     "claim_text": sent.text.strip(),
                     "source": "transcript",
-                    "confidence": 0.85
+                    "confidence": 0.9 if len(sent.ents) > 0 else 0.8
                 })
     
     # 2. Extract from OCR
@@ -120,12 +138,15 @@ def run(state: dict) -> dict:
                          claims.append({
                             "claim_text": sent.text.strip(),
                             "source": "ocr",
-                            "confidence": 0.75
+                            "confidence": 0.8 if len(sent.ents) > 0 else 0.7
                         })
 
     # Deduplicate claims
     unique_claims = []
     seen_texts = set()
+    # Sort by confidence first
+    claims.sort(key=lambda x: x["confidence"], reverse=True)
+    
     for c in claims:
         txt = c["claim_text"]
         if txt not in seen_texts:
@@ -136,10 +157,10 @@ def run(state: dict) -> dict:
     final_claims = unique_claims[:5]
     
     if not final_claims and transcript:
-        # Fallback
+        # Fallback: Just take the first sentence if it's long enough
         doc = nlp(transcript)
         sents = list(doc.sents)
-        if sents:
+        if sents and len(sents[0]) > 3:
              final_claims.append({
                  "claim_text": sents[0].text.strip(),
                  "source": "transcript_fallback",
@@ -149,7 +170,7 @@ def run(state: dict) -> dict:
 
     print(f"Extracted {len(final_claims)} claims.")
     for c in final_claims:
-        print(f" - {c['claim_text'][:50]}...")
+        print(f" - {c['claim_text'][:50]}... (Conf: {c['confidence']})")
 
     state["claims"] = final_claims
     return state
