@@ -3,3 +3,4 @@ processed
 models/
 cookies.txt
 videos/
+.env*

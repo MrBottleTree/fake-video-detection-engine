@@ -8,13 +8,22 @@ from typing import List, Dict, Any, Optional, TypedDict, Union
 from datetime import datetime
 import re
 
+import json
+import os
+import time
+import hashlib
+import logging
+import uuid
+from typing import List, Dict, Any, Optional, TypedDict, Union
+from datetime import datetime
+import re
+
 # Standard Imports
 from duckduckgo_search import DDGS
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from sentence_transformers import SentenceTransformer, util
-import redis
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -60,6 +69,7 @@ def run(state: dict) -> dict:
     - Minimal user-facing prints, detailed logging
     - Smart queries (Supporting vs Contradicting)
     - Claim ID generation
+    - In-memory caching
     """
     print("Node E1: Retrieving Web Evidence...")
     
@@ -150,7 +160,7 @@ def run(state: dict) -> dict:
 # --- Helper Class ---
 
 class WebSearcher:
-    """Robust web searcher with fallbacks and caching."""
+    """Robust web searcher with fallbacks and in-memory caching."""
     
     def __init__(self, debug: bool = False, use_cache: bool = True):
         self.debug = debug
@@ -166,26 +176,11 @@ class WebSearcher:
         retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
         self.session.mount('https://', HTTPAdapter(max_retries=retries))
         
-        # Cache
-        self.redis_client = None
-        if self.use_cache:
-            self._init_cache()
+        # In-Memory Cache
+        self.memory_cache: Dict[str, List[EvidenceResult]] = {}
             
         # Models
         self.embedding_model = None # Lazy load
-        
-    def _init_cache(self):
-        try:
-            self.redis_client = redis.Redis(
-                host=os.environ.get('REDIS_HOST', 'localhost'),
-                port=int(os.environ.get('REDIS_PORT', 6379)),
-                decode_responses=True,
-                socket_connect_timeout=1
-            )
-            self.redis_client.ping()
-        except Exception as e:
-            logger.warning(f"Redis unavailable: {e}. Caching disabled.")
-            self.redis_client = None
 
     def construct_queries(self, claim: Claim) -> List[str]:
         """Generate smart search queries (Supporting & Contradicting)."""
@@ -348,19 +343,9 @@ class WebSearcher:
         return results
 
     def _get_from_cache(self, query: str) -> Optional[List[EvidenceResult]]:
-        if not self.redis_client: return None
-        key = f"search:{hashlib.md5(query.encode()).hexdigest()}"
-        try:
-            data = self.redis_client.get(key)
-            if data: return json.loads(data)
-        except Exception:
-            pass
-        return None
+        if not self.use_cache: return None
+        return self.memory_cache.get(query)
 
     def _save_to_cache(self, query: str, results: List[EvidenceResult]):
-        if not self.redis_client: return
-        key = f"search:{hashlib.md5(query.encode()).hexdigest()}"
-        try:
-            self.redis_client.setex(key, 3600, json.dumps(results))
-        except Exception:
-            pass
+        if not self.use_cache: return
+        self.memory_cache[query] = results
