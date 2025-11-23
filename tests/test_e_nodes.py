@@ -11,21 +11,11 @@ def create_mock_module(version="2.0.0"):
     return m
 
 # Mock dependencies that might be missing in the test environment
-sys.modules["moviepy"] = create_mock_module()
-sys.modules["moviepy.editor"] = create_mock_module()
-sys.modules["librosa"] = create_mock_module()
-sys.modules["yt_dlp"] = create_mock_module()
-sys.modules["imageio_ffmpeg"] = create_mock_module()
-sys.modules["cv2"] = create_mock_module()
-sys.modules["numpy"] = create_mock_module()
-sys.modules["face_alignment"] = create_mock_module()
-sys.modules["torch"] = create_mock_module()
-sys.modules["easyocr"] = create_mock_module()
-sys.modules["whisper"] = create_mock_module()
-sys.modules["scipy"] = create_mock_module()
-sys.modules["scipy.spatial"] = create_mock_module()
-sys.modules["sklearn"] = create_mock_module()
-sys.modules["sklearn.linear_model"] = create_mock_module()
+# Mock dependencies that might be missing in the test environment
+# Only mock packages that are NOT in pyproject.toml or guaranteed to be installed
+if "sklearn" not in sys.modules:
+    sys.modules["sklearn"] = create_mock_module()
+    sys.modules["sklearn.linear_model"] = create_mock_module()
 # requests, duckduckgo_search, and bs4 are installed, so we don't mock them in sys.modules
 # to avoid breaking their internal imports (like requests.exceptions)
 
