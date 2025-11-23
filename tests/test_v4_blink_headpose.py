@@ -20,8 +20,9 @@ class TestV4BlinkHeadPose(unittest.TestCase):
 
     @patch("cv2.VideoCapture")
     @patch("face_alignment.FaceAlignment")
+    @patch("nodes.V_nodes.v4_blink_headpose_dynamics.SixDRepNet")
     @patch("cv2.VideoWriter")
-    def test_blink_and_pose_extraction(self, mock_VideoWriter, mock_FaceAlignment, mock_VideoCapture):
+    def test_blink_and_pose_extraction(self, mock_VideoWriter, mock_SixDRepNet, mock_FaceAlignment, mock_VideoCapture):
         print("\nTesting V4 blink and pose extraction...")
 
         # Mock VideoCapture
@@ -66,6 +67,12 @@ class TestV4BlinkHeadPose(unittest.TestCase):
 
         # V4 now uses get_landmarks_from_image for 3D
         mock_fa.get_landmarks_from_image.return_value = [landmarks]
+
+        # Mock SixDRepNet
+        mock_pose_model = MagicMock()
+        mock_SixDRepNet.return_value = mock_pose_model
+        # predict returns pitch, yaw, roll (batch size 1)
+        mock_pose_model.predict.return_value = (np.array([10.0]), np.array([20.0]), np.array([5.0]))
 
         state = {
             "data_dir": self.test_dir,

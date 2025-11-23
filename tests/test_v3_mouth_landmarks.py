@@ -66,7 +66,7 @@ class TestV3MouthLandmarks(unittest.TestCase):
         
         new_state = v3_mouth_landmarks_timeseries.run(state)
         
-        mock_FaceAlignment.assert_called_with(face_alignment.LandmarksType.TWO_D, device='cuda', face_detector='sfd')
+        mock_FaceAlignment.assert_called_with(face_alignment.LandmarksType.TWO_D, device='cuda', face_detector='sfd', face_detector_kwargs={'filter_threshold': 0.5})
         
         self.assertIn("mouth_landmarks", new_state)
         self.assertIn("mouth_landmarks_viz_path", new_state)
