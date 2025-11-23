@@ -1,6 +1,8 @@
 import logging
 import spacy
 import torch
+import subprocess
+import sys
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -21,10 +23,26 @@ def get_spacy_model():
             logger.info("C3: Loading Spacy model 'en_core_web_sm'...")
             nlp_model = spacy.load("en_core_web_sm")
         except OSError:
-            logger.warning("C3: 'en_core_web_sm' not found. Downloading...")
-            from spacy.cli import download
-            download("en_core_web_sm")
-            nlp_model = spacy.load("en_core_web_sm")
+            logger.warning("C3: 'en_core_web_sm' not found. Attempting download...")
+            try:
+                # Use subprocess to avoid sys.exit() from spacy.cli.download
+                result = subprocess.run(
+                    [sys.executable, "-m", "spacy", "download", "en_core_web_sm"],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minute timeout
+                )
+                if result.returncode == 0:
+                    logger.info("C3: Successfully downloaded 'en_core_web_sm'.")
+                    nlp_model = spacy.load("en_core_web_sm")
+                else:
+                    logger.error(f"C3: Failed to download 'en_core_web_sm': {result.stderr}. Falling back to blank model.")
+                    nlp_model = spacy.blank("en")
+                    nlp_model.add_pipe("sentencizer")
+            except Exception as download_error:
+                logger.error(f"C3: Failed to download 'en_core_web_sm': {download_error}. Falling back to blank model.")
+                nlp_model = spacy.blank("en")
+                nlp_model.add_pipe("sentencizer")
         except Exception as e:
             logger.error(f"C3: Failed to load 'en_core_web_sm': {e}. Falling back to blank model.")
             nlp_model = spacy.blank("en")
