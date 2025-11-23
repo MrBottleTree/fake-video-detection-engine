@@ -26,7 +26,7 @@ def calculate_mar(mouth_points):
     return mar
 
 def run(state: dict) -> dict:
-    print("Node C1: Analyzing Lip Sync (Robust MAR Calculation)...")
+    print("Node C1: Analyzing Lip Sync (Robust Windowed Correlation)...")
 
     mouth_landmarks = state.get("mouth_landmarks")
     audio_onsets = state.get("audio_onsets")
@@ -36,7 +36,7 @@ def run(state: dict) -> dict:
 
     if not mouth_landmarks or not audio_onsets:
         print(" C1: Warning - Missing mouth landmarks or audio onsets. Cannot compute lip-sync score.")
-        state["lip_sync_score"] = 0.0 #default bad score
+        state["lip_sync_score"] = 0.0 
         return state
 
     if not fps or not duration:
@@ -94,30 +94,77 @@ def run(state: dict) -> dict:
     audio_signal_norm = (audio_signal - np.mean(audio_signal)) / (np.std(audio_signal) + epsilon)
 
     
-    max_lag_frames = int(fps * 0.5)
-    # Ensure signal is long enough
-    if len(mouth_signal_norm) <= 2 * max_lag_frames:
-         print(" C1: Warning - Signal too short for correlation.")
-         state["lip_sync_score"] = 0.0
-         return state
-
-    sub_mouth_signal = mouth_signal_norm[max_lag_frames:-max_lag_frames]
+    max_lag_frames = int(fps * 0.5) # +/- 0.5 seconds lag allowed
     
-    # `correlate` will check lags from -max_lag_frames to +max_lag_frames
-    correlation = correlate(audio_signal_norm, sub_mouth_signal, mode='valid', method='fft')
+    # --- Robust Windowed Correlation ---
+    # Instead of one global correlation, we compute correlation in overlapping windows
+    # and take the average of the top N windows. This handles silence/noise.
     
-    if len(sub_mouth_signal) > 0:
-        normalized_correlation = correlation / len(sub_mouth_signal)
+    window_duration = 5.0 # seconds
+    window_size = int(window_duration * fps)
+    step_size = int(window_size / 2) # 50% overlap
+    
+    if len(mouth_signal_norm) < window_size:
+        # Signal too short for windowing, fall back to global
+        windows = [(mouth_signal_norm, audio_signal_norm)]
     else:
-        normalized_correlation = np.array([0.0])
+        windows = []
+        for i in range(0, len(mouth_signal_norm) - window_size + 1, step_size):
+            m_win = mouth_signal_norm[i : i + window_size]
+            a_win = audio_signal_norm[i : i + window_size]
+            windows.append((m_win, a_win))
+            
+    window_scores = []
+    
+    for m_win, a_win in windows:
+        # Skip windows with no audio activity (silence)
+        if np.std(a_win) < 0.01:
+            continue
+            
+        # Skip windows with no mouth movement (static face)
+        if np.std(m_win) < 0.01:
+            continue
+            
+        # Cross-correlation
+        # We only care about the center part of the correlation to avoid edge effects?
+        # Actually, 'valid' mode handles this if we crop one signal.
+        # But here both are same size. 'same' or 'full' is needed, or just standard correlate.
+        # Let's use the same logic as before but on the window.
+        
+        # To allow lag, we need one signal to be shorter or just use full correlation and find peak near center.
+        # Let's use full correlation.
+        corr = correlate(a_win, m_win, mode='full')
+        lags = np.arange(-len(a_win) + 1, len(a_win))
+        
+        # Filter for lags within max_lag_frames
+        valid_indices = np.where(np.abs(lags) <= max_lag_frames)[0]
+        if len(valid_indices) == 0:
+            continue
+            
+        valid_corr = corr[valid_indices]
+        
+        # Normalize by length
+        norm_corr = valid_corr / len(m_win)
+        
+        max_corr = np.max(norm_corr)
+        window_scores.append(max_corr)
+        
+    if not window_scores:
+        print(" C1: Warning - No valid windows found (silence or static). Defaulting to 0.0")
+        lip_sync_score = 0.0
+    else:
+        # Take the average of the top 50% of window scores
+        # This assumes at least half the video should be in sync if it's real/good fake.
+        # It ignores bad segments (looking away, silence).
+        window_scores.sort(reverse=True)
+        top_n = max(1, int(len(window_scores) * 0.5))
+        top_scores = window_scores[:top_n]
+        lip_sync_score = float(np.mean(top_scores))
+        
+        # Clamp
+        lip_sync_score = max(0.0, lip_sync_score)
 
-    # The lip-sync score is the maximum positive correlation found within the lag window.
-    # We are interested in positive correlation (mouth opens when sound occurs).
-    # We use np.max and clamp it at 0, as a negative correlation implies anti-sync.
-    score = np.max(normalized_correlation)
-    lip_sync_score = max(0.0, float(score))
-
-    print(f" C1: Lip Sync Analysis Complete. Score: {lip_sync_score:.4f}")
+    print(f" C1: Lip Sync Analysis Complete. Score: {lip_sync_score:.4f} (Computed over {len(window_scores)} windows)")
     state["lip_sync_score"] = lip_sync_score
 
     return state
