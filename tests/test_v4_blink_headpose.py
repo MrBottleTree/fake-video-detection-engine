@@ -11,7 +11,6 @@ class TestV4BlinkHeadPose(unittest.TestCase):
         os.makedirs(self.test_dir, exist_ok=True)
         self.video_path = os.path.join(self.test_dir, "video.mp4")
         
-        # Create a dummy video file
         with open(self.video_path, "wb") as f:
             f.write(b"dummy video content")
 
@@ -43,29 +42,30 @@ class TestV4BlinkHeadPose(unittest.TestCase):
         mock_fa = MagicMock()
         mock_FaceAlignment.return_value = mock_fa
         
-        # Create dummy landmarks (68 points)
+        # Create dummy landmarks (68 points, 3D)
         # We need specific points for eyes and nose to test EAR and Pose
-        landmarks = np.zeros((68, 2), dtype=np.float32)
+        landmarks = np.zeros((68, 3), dtype=np.float32)
         
         # Set Nose (30)
-        landmarks[30] = [320, 240]
+        landmarks[30] = [320, 240, 0]
         # Set Chin (8)
-        landmarks[8] = [320, 340]
+        landmarks[8] = [320, 340, 0]
         # Set Eyes (36-41, 42-47)
         # Open eyes
-        landmarks[36] = [280, 200]; landmarks[39] = [300, 200]
-        landmarks[37] = [290, 195]; landmarks[38] = [295, 195]
-        landmarks[40] = [295, 205]; landmarks[41] = [290, 205]
+        landmarks[36] = [280, 200, 0]; landmarks[39] = [300, 200, 0]
+        landmarks[37] = [290, 195, 0]; landmarks[38] = [295, 195, 0]
+        landmarks[40] = [295, 205, 0]; landmarks[41] = [290, 205, 0]
         
-        landmarks[42] = [340, 200]; landmarks[45] = [360, 200]
-        landmarks[43] = [345, 195]; landmarks[44] = [355, 195]
-        landmarks[46] = [355, 205]; landmarks[47] = [350, 205]
+        landmarks[42] = [340, 200, 0]; landmarks[45] = [360, 200, 0]
+        landmarks[43] = [345, 195, 0]; landmarks[44] = [355, 195, 0]
+        landmarks[46] = [355, 205, 0]; landmarks[47] = [350, 205, 0]
         
         # Mouth (48, 54)
-        landmarks[48] = [290, 280]
-        landmarks[54] = [350, 280]
+        landmarks[48] = [290, 280, 0]
+        landmarks[54] = [350, 280, 0]
 
-        mock_fa.get_landmarks.return_value = [landmarks]
+        # V4 now uses get_landmarks_from_image for 3D
+        mock_fa.get_landmarks_from_image.return_value = [landmarks]
 
         state = {
             "data_dir": self.test_dir,
