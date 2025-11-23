@@ -95,7 +95,8 @@ def run(state: dict) -> dict:
         })
         
         scored_claims.append(new_claim)
-        print(f"Claim: '{claim_text[:50]}...' -> Verdict: {verdict} (Score: {final_score:.2f}, Sources: {evidence_count})")
+        safe_claim_text = claim_text if claim_text else ""
+        print(f"Claim: '{safe_claim_text[:50]}...' -> Verdict: {verdict} (Score: {final_score:.2f}, Sources: {evidence_count})")
 
     state["claims"] = scored_claims
     return state
