@@ -103,6 +103,16 @@ def in_node(state: State) -> State:
                     }
                     success = True
                     
+                    # Save a copy to 'videos' folder as requested
+                    try:
+                        videos_dir = "videos"
+                        os.makedirs(videos_dir, exist_ok=True)
+                        saved_video_path = os.path.join(videos_dir, f"video_{timestamp}.mp4")
+                        shutil.copy2(video_path, saved_video_path)
+                        print(f"Video saved to: {saved_video_path}")
+                    except Exception as save_err:
+                        print(f"Warning: Failed to save copy to 'videos' folder: {save_err}")
+                    
             except yt_dlp.utils.DownloadError as e:
                 retry_count += 1
                 print(f"Download attempt {retry_count} failed: {e}")
