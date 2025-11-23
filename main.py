@@ -40,6 +40,11 @@ class State(TypedDict):
     blink_data: Annotated[Optional[list], overwrite]
     head_pose_data: Annotated[Optional[list], overwrite]
     headpose_viz_path: Annotated[Optional[str], overwrite]
+    
+    lip_sync_score: Annotated[Optional[float], overwrite]
+    claims: Annotated[Optional[list], overwrite]
+    evidence: Annotated[Optional[list], overwrite]
+    features: Annotated[Optional[Dict[str, float]], overwrite]
 
 def in_node(state: State) -> State:
     input_path = state["input_path"]
