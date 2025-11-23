@@ -25,4 +25,5 @@ dependencies = [
     "aiohttp>=3.9.0",
     "prometheus-client>=0.19.0",
     "sixdrepnet>=0.1.6",
+    "pip>=24.0",
 ]
