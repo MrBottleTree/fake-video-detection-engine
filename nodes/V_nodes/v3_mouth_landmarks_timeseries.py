@@ -23,7 +23,12 @@ def run(state: dict) -> dict:
         if debug:
             print(f"[DEBUG] V3: Using device: {device}")
         
-        fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, device=device, face_detector='sfd')
+        # Suppress "No faces were detected" warning
+        import warnings
+        warnings.filterwarnings("ignore", category=UserWarning, module="face_alignment")
+        
+        # Lower threshold for better recall
+        fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.TWO_D, device=device, face_detector='sfd', face_detector_kwargs={'filter_threshold': 0.5})
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():

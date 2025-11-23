@@ -5,6 +5,7 @@ import face_alignment
 import torch
 from scipy.spatial import distance as dist
 import math
+from sixdrepnet import SixDRepNet
 
 class OneEuroFilter:
     def __init__(self, t0, x0, dx0=0.0, min_cutoff=1.0, beta=0.0, d_cutoff=1.0):
@@ -52,29 +53,38 @@ def eye_aspect_ratio(eye):
     ear = (A + B) / (2.0 * C)
     return ear
 
-def get_head_pose(shape, frame_width, frame_height):
-    image_points = np.array([shape[30][:2],shape[8][:2], shape[36][:2],shape[45][:2],shape[48][:2],shape[54][:2] ], dtype="double")
- 
-    model_points = np.array([(0.0, 0.0, 0.0),(0.0, -330.0, -65.0),(-225.0, 170.0, -135.0),(225.0, 170.0, -135.0),(-150.0, -150.0, -125.0),(150.0, -150.0, -125.0)])
- 
-    focal_length = frame_width
-    center = (frame_width/2, frame_height/2)
-    camera_matrix = np.array([[focal_length, 0, center[0]], [0, focal_length, center[1]], [0, 0, 1]], dtype = "double" )
- 
-    dist_coeffs = np.zeros((4,1))
-    
-    (success, rotation_vector, translation_vector) = cv2.solvePnP(model_points, image_points, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
-    
-    (nose_end_point2D, jacobian) = cv2.projectPoints(np.array([(0.0, 0.0, 1000.0)]), rotation_vector, translation_vector, camera_matrix, dist_coeffs)
-    
-    rmat, jac = cv2.Rodrigues(rotation_vector)
-    angles, mtxR, mtxQ, Qx, Qy, Qz = cv2.RQDecomp3x3(rmat)
-    
-    pitch = angles[0]
-    yaw = angles[1]
-    roll = angles[2]
-    
-    return pitch, yaw, roll, nose_end_point2D
+def draw_axis(img, yaw, pitch, roll, tdx=None, tdy=None, size = 100):
+    # Referenced from SixDRepNet utils
+    pitch = pitch * np.pi / 180
+    yaw = -(yaw * np.pi / 180)
+    roll = roll * np.pi / 180
+
+    if tdx != None and tdy != None:
+        tdx = tdx
+        tdy = tdy
+    else:
+        height, width = img.shape[:2]
+        tdx = width / 2
+        tdy = height / 2
+
+    # X-Axis pointing to right. drawn in red
+    x1 = size * (math.cos(yaw) * math.cos(roll)) + tdx
+    y1 = size * (math.cos(pitch) * math.sin(roll) + math.cos(roll) * math.sin(pitch) * math.sin(yaw)) + tdy
+
+    # Y-Axis | drawn in green
+    #        v
+    x2 = size * (-math.cos(yaw) * math.sin(roll)) + tdx
+    y2 = size * (math.cos(pitch) * math.cos(roll) - math.sin(pitch) * math.sin(yaw) * math.sin(roll)) + tdy
+
+    # Z-Axis (out of the screen) drawn in blue
+    x3 = size * (math.sin(yaw)) + tdx
+    y3 = size * (-math.cos(yaw) * math.sin(pitch)) + tdy
+
+    cv2.line(img, (int(tdx), int(tdy)), (int(x1),int(y1)),(0,0,255),3)
+    cv2.line(img, (int(tdx), int(tdy)), (int(x2),int(y2)),(0,255,0),3)
+    cv2.line(img, (int(tdx), int(tdy)), (int(x3),int(y3)),(255,0,0),2)
+
+    return img
 
 def calculate_iou(boxA, boxB):
     xA = max(boxA[0], boxB[0])
@@ -92,7 +102,7 @@ def calculate_iou(boxA, boxB):
     return iou
 
 def run(state: dict) -> dict:
-    print("Node V4: Analyzing Blink and Head Pose Dynamics (Robust 3D Mode)...")
+    print("Node V4: Analyzing Blink (FaceAlignment) and Head Pose (SixDRepNet)...")
     output_dir = state.get("data_dir")
     debug = state.get("debug", False)
     
@@ -106,11 +116,21 @@ def run(state: dict) -> dict:
         return state
 
     try:
+        # Initialize Face Alignment in 3D mode (for landmarks/blink)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         if debug:
-            print(f"[DEBUG] V4: Using device: {device} (3D Mode)")
+            print(f"[DEBUG] V4: Using device: {device}")
             
-        fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.THREE_D, device=device, face_detector='sfd')
+        # Suppress "No faces were detected" warning
+        import warnings
+        warnings.filterwarnings("ignore", category=UserWarning, module="face_alignment")
+            
+        # 3D Landmarks for better accuracy
+        fa = face_alignment.FaceAlignment(face_alignment.LandmarksType.THREE_D, device=device, face_detector='sfd', face_detector_kwargs={'filter_threshold': 0.5})
+
+        # Initialize SixDRepNet for Robust Head Pose
+        # dict_path=None will download weights automatically if not found
+        pose_model = SixDRepNet(gpu_id=0 if device == 'cuda' else -1)
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -126,6 +146,7 @@ def run(state: dict) -> dict:
         
         active_face_box = None
         landmark_filter = None
+        pose_filter = None # OneEuroFilter for pose angles
         
         viz_path = os.path.join(output_dir, "headpose_viz.mp4")
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -152,6 +173,7 @@ def run(state: dict) -> dict:
             if landmarks_list:
                 best_face_idx = -1
                 
+                # Tracking Logic
                 if active_face_box is None:
                     max_area = -1
                     for i, landmarks in enumerate(landmarks_list):
@@ -187,8 +209,9 @@ def run(state: dict) -> dict:
                     
                     if max_iou < 0.3:
                         if debug:
-                            print(f"[DEBUG] Frame {frame_count}: Tracking lost (IoU {max_iou:.2f}), resetting to largest face.")
+                            print(f"[DEBUG] Frame {frame_count}: Tracking lost (IoU {max_iou:.2f}), resetting.")
                         active_face_box = None
+                        # Fallback to largest face
                         max_area = -1
                         for i, landmarks in enumerate(landmarks_list):
                             x_min = int(np.min(landmarks[:, 0]))
@@ -207,13 +230,24 @@ def run(state: dict) -> dict:
                     y_min = int(np.min(raw_landmarks[:, 1]))
                     x_max = int(np.max(raw_landmarks[:, 0]))
                     y_max = int(np.max(raw_landmarks[:, 1]))
+                    
+                    # Expand box slightly for SixDRepNet
+                    pad_w = int((x_max - x_min) * 0.1)
+                    pad_h = int((y_max - y_min) * 0.1)
+                    x_min = max(0, x_min - pad_w)
+                    y_min = max(0, y_min - pad_h)
+                    x_max = min(frame_width, x_max + pad_w)
+                    y_max = min(frame_height, y_max + pad_h)
+                    
                     active_face_box = [x_min, y_min, x_max, y_max]
                     
+                    # 1. Blink Detection (EAR) - Smoothed
                     if landmark_filter is None:
                         landmark_filter = OneEuroFilter(current_time, raw_landmarks, min_cutoff=0.5, beta=0.1)
                         smoothed_landmarks = raw_landmarks
                     else:
                         smoothed_landmarks = landmark_filter(current_time, raw_landmarks)
+                        
                     leftEye = smoothed_landmarks[36:42]
                     rightEye = smoothed_landmarks[42:48]
                     leftEAR = eye_aspect_ratio(leftEye)
@@ -221,21 +255,45 @@ def run(state: dict) -> dict:
                     ear = (leftEAR + rightEAR) / 2.0
                     current_ear = ear
                     
-                    pitch, yaw, roll, nose_end_point2D = get_head_pose(smoothed_landmarks, frame_width, frame_height)
-                    current_pose = {"pitch": pitch, "yaw": yaw, "roll": roll}
-                    
+                    # 2. Robust Head Pose (SixDRepNet)
+                    # Crop face
+                    face_img = frame[y_min:y_max, x_min:x_max]
+                    if face_img.size > 0:
+                        # Predict
+                        pitch, yaw, roll = pose_model.predict(face_img)
+                        # SixDRepNet returns single values usually, ensure float
+                        pitch = float(pitch[0])
+                        yaw = float(yaw[0])
+                        roll = float(roll[0])
+                        
+                        # Smooth Pose
+                        pose_vec = np.array([pitch, yaw, roll])
+                        if pose_filter is None:
+                            pose_filter = OneEuroFilter(current_time, pose_vec, min_cutoff=0.1, beta=0.1) # Stronger smoothing for pose
+                            smoothed_pose = pose_vec
+                        else:
+                            smoothed_pose = pose_filter(current_time, pose_vec)
+                            
+                        pitch, yaw, roll = smoothed_pose
+                        current_pose = {"pitch": pitch, "yaw": yaw, "roll": roll}
+                        
+                        # Visualization
+                        # Draw Axis at nose center (landmark 30)
+                        nose_x = int(smoothed_landmarks[30][0])
+                        nose_y = int(smoothed_landmarks[30][1])
+                        draw_axis(frame, yaw, pitch, roll, tdx=nose_x, tdy=nose_y, size=50)
+
+                    # Draw Eyes
                     for (x, y, z) in np.concatenate((leftEye, rightEye), axis=0):
                         cv2.circle(frame, (int(x), int(y)), 2, (0, 255, 0), -1)
-                        
-                    p1 = (int(smoothed_landmarks[30][0]), int(smoothed_landmarks[30][1]))
-                    p2 = (int(nose_end_point2D[0][0][0]), int(nose_end_point2D[0][0][1]))
-                    cv2.line(frame, p1, p2, (255, 0, 0), 2)
                     
+                    # Draw Box
                     cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 255), 1)
                     
                     cv2.putText(frame, f"EAR: {ear:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    cv2.putText(frame, f"Y:{yaw:.1f} P:{pitch:.1f} R:{roll:.1f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(frame, "3D+Smoothed", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                    if current_pose:
+                        cv2.putText(frame, f"Y:{yaw:.0f} P:{pitch:.0f} R:{roll:.0f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(frame, "SixDRepNet+Smooth", (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
             viz_writer.write(frame)
             
@@ -269,7 +327,7 @@ def run(state: dict) -> dict:
         if "metadata" not in state:
             state["metadata"] = {}
         state["metadata"]["blink_model"] = "EAR_threshold_3D_smoothed"
-        state["metadata"]["pose_model"] = "SolvePnP_3D_smoothed"
+        state["metadata"]["pose_model"] = "SixDRepNet_smoothed"
 
     except Exception as e:
         print(f"Error in V4 node: {e}")
