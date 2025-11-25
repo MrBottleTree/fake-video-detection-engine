@@ -172,7 +172,7 @@ class WebSearcher:
         
         # API Keys
         self.serper_key = os.environ.get("SERPER_API_KEY")
-        self.google_key = os.environ.get("GOOGLE_API_KEY")
+        self.google_key = os.environ.get("GOOGLE_API_WEB_KEY")
         self.google_cx = os.environ.get("GOOGLE_CX")
         
         # Configure LLM for Query Generation
