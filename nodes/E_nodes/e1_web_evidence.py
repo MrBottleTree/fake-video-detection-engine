@@ -176,11 +176,27 @@ class WebSearcher:
         self.google_cx = os.environ.get("GOOGLE_CX")
         
         # Configure LLM for Query Generation
+        self.llm_model = None
         if self.google_key:
             genai.configure(api_key=self.google_key)
-            self.llm_model = genai.GenerativeModel('gemini-1.5-flash')
-        else:
-            self.llm_model = None
+            preferred = os.environ.get("GENAI_MODEL")
+            candidates = [preferred] if preferred else []
+            candidates += [
+                "models/gemini-1.5-flash-latest",
+                "gemini-1.5-flash-latest",
+                "gemini-1.5-flash",
+                "models/gemini-1.0-pro",
+                "gemini-1.0-pro",
+            ]
+            for name in candidates:
+                if not name:
+                    continue
+                try:
+                    self.llm_model = genai.GenerativeModel(model_name=name)
+                    logger.info(f"E1: Using Gemini model '{name}' for query generation.")
+                    break
+                except Exception as e:
+                    logger.warning(f"E1: Model '{name}' unavailable ({e}); trying next.")
         
         # HTTP Session
         self.session = requests.Session()

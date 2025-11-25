@@ -43,12 +43,39 @@ class LLMClaimExtractor:
     
     def __init__(self):
         self.api_key = os.environ.get("GOOGLE_API_KEY")
-        if self.api_key:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
-        else:
-            self.model = None
+        self.model = None
+        self.model_name = None
+
+        if not self.api_key:
             logger.warning("C3: GOOGLE_API_KEY not found. LLM extraction disabled.")
+            return
+
+        genai.configure(api_key=self.api_key)
+
+        # Allow override via ENV, otherwise try a resilient list
+        preferred = os.environ.get("GENAI_MODEL")
+        candidates = [preferred] if preferred else []
+        candidates += [
+            "models/gemini-1.5-flash-latest",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-flash",
+            "models/gemini-1.0-pro",
+            "gemini-1.0-pro",
+        ]
+
+        for name in candidates:
+            if not name:
+                continue
+            try:
+                self.model = genai.GenerativeModel(model_name=name)
+                self.model_name = name
+                logger.info(f"C3: Using Gemini model '{name}'")
+                break
+            except Exception as e:
+                logger.warning(f"C3: Model '{name}' unavailable ({e}); trying next.")
+
+        if not self.model:
+            logger.error("C3: No valid Gemini model could be initialized; LLM extraction disabled.")
 
     def extract(self, transcript: str, ocr_text: str) -> List[Dict[str, Any]]:
         if not self.model:
