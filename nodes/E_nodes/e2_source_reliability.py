@@ -166,13 +166,34 @@ def run(state: dict) -> dict:
     ]
     """
     print("--- E2: Source Reliability ---")
-    evidence_list = state.get("evidence", [])
+    evidence_raw = state.get("evidence", [])
     
-    if not evidence_list:
+    if not evidence_raw:
         print("No evidence found to score.")
         return state
 
     trusted_sources = load_trusted_sources()
+
+    # Normalize/flatten evidence from E1 (which groups by claim)
+    evidence_list = []
+    for item in evidence_raw:
+        if isinstance(item, dict) and "results" in item and "claim" in item:
+            claim_info = item.get("claim", {})
+            claim_text = claim_info.get("claim_text") or claim_info.get("text") or ""
+            for res in item.get("results", []):
+                combined = res.copy()
+                combined["claim_text"] = combined.get("claim_text", claim_text)
+                evidence_list.append(combined)
+        elif isinstance(item, dict):
+            combined = item.copy()
+            if "claim_text" not in combined:
+                combined["claim_text"] = item.get("claim", {}).get("claim_text", "")
+            evidence_list.append(combined)
+
+    if not evidence_list:
+        print("No evidence found to score after normalization.")
+        state["evidence"] = []
+        return state
     
     # Calculate consensus counts
     # We count how many unique domains support each claim

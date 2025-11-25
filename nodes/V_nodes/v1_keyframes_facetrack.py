@@ -19,13 +19,16 @@ def run(state: dict) -> dict:
 
         cap = cv2.VideoCapture(os.path.join(output_dir, "video.mp4"))
         if not cap.isOpened():
-            raise IOError(f"Cannot open video file {os.path.join(output_dir, "video.mp4")}")
+            raise IOError(f"Cannot open video file {os.path.join(output_dir, 'video.mp4')}")
 
         fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         frame_area = frame_width * frame_height
+
+        if fps <= 0:
+            raise ValueError("Video FPS is zero or undefined; cannot sample keyframes.")
         
         if debug:
             print(f"[DEBUG] V1: Video FPS: {fps}, Size: {frame_width}x{frame_height}")

@@ -11,7 +11,29 @@ import imageio_ffmpeg
 from typing import Optional, Dict, Any, TypedDict, Annotated
 import operator
 import warnings
+from pathlib import Path
 warnings.filterwarnings("ignore", message=".*'pin_memory' argument is set as true.*")
+
+
+def load_env_file(path: str = ".env") -> None:
+    """Lightweight .env loader so API keys work outside of IDEs."""
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+# Ensure .env entries are available before any node tries to read them
+load_env_file()
 
 def overwrite(left, right):
     return right
@@ -45,6 +67,10 @@ class State(TypedDict):
     claims: Annotated[Optional[list], overwrite]
     evidence: Annotated[Optional[list], overwrite]
     features: Annotated[Optional[Dict[str, float]], overwrite]
+    narration_alignment: Annotated[Optional[float], overwrite]
+    face_presence_ratio: Annotated[Optional[float], overwrite]
+    texture_anomaly_score: Annotated[Optional[float], overwrite]
+    blink_rate: Annotated[Optional[float], overwrite]
 
 def in_node(state: State) -> State:
     input_path = state["input_path"]
