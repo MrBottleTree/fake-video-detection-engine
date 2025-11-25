@@ -159,6 +159,10 @@ def run(state: dict) -> dict:
 
 # --- Helper Class ---
 
+import google.generativeai as genai
+
+# ... (Previous imports remain, ensure google.generativeai is imported)
+
 class WebSearcher:
     """Robust web searcher with fallbacks and in-memory caching."""
     
@@ -170,6 +174,13 @@ class WebSearcher:
         self.serper_key = os.environ.get("SERPER_API_KEY")
         self.google_key = os.environ.get("GOOGLE_API_KEY")
         self.google_cx = os.environ.get("GOOGLE_CX")
+        
+        # Configure LLM for Query Generation
+        if self.google_key:
+            genai.configure(api_key=self.google_key)
+            self.llm_model = genai.GenerativeModel('gemini-1.5-flash')
+        else:
+            self.llm_model = None
         
         # HTTP Session
         self.session = requests.Session()
@@ -183,26 +194,41 @@ class WebSearcher:
         self.embedding_model = None # Lazy load
 
     def construct_queries(self, claim: Claim) -> List[str]:
-        """Generate smart search queries (Supporting & Contradicting)."""
+        """Generate smart search queries using LLM (with fallback)."""
         queries = set()
         text = claim['claim_text']
         
-        # 1. Neutral / Fact Check
-        queries.add(f"{text} fact check")
-        queries.add(f"is it true that {text}")
+        # 1. Try LLM Generation
+        if self.llm_model:
+            try:
+                prompt = f"""
+                Generate 3 specific Google search queries to verify this claim: "{text}".
+                Include:
+                1. A neutral fact-check query.
+                2. A query looking for supporting evidence.
+                3. A query looking for debunking/contradicting evidence.
+                
+                Return ONLY a JSON list of strings. Example: ["query1", "query2", "query3"]
+                """
+                response = self.llm_model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+                llm_queries = json.loads(response.text)
+                if isinstance(llm_queries, list):
+                    queries.update(llm_queries)
+            except Exception as e:
+                logger.warning(f"LLM Query Generation failed: {e}")
         
-        # 2. Supporting (Positive bias)
-        queries.add(f"proof that {text}")
-        queries.add(f"evidence for {text}")
-        
-        # 3. Contradicting (Negative bias - Debunking)
-        queries.add(f"{text} debunked")
-        queries.add(f"{text} fake")
-        queries.add(f"{text} hoax")
-        
-        # 4. Entity specific (if available)
-        if claim['who'] and claim['what']:
-            queries.add(f"{claim['who']} {claim['what']} controversy")
+        # 2. Fallback / Augmentation (Rule-based)
+        if not queries:
+            # Neutral
+            queries.add(f"{text} fact check")
+            queries.add(f"is it true that {text}")
+            
+            # Supporting
+            queries.add(f"proof that {text}")
+            
+            # Debunking
+            queries.add(f"{text} debunked")
+            queries.add(f"{text} fake")
             
         return list(queries)
 

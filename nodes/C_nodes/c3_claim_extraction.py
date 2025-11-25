@@ -3,12 +3,16 @@ import spacy
 import torch
 import subprocess
 import sys
+import os
+import json
+import google.generativeai as genai
+from typing import List, Dict, Any, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Global model cache to avoid reloading
+# Global model cache
 nlp_model = None
 
 def get_spacy_model():
@@ -17,160 +21,130 @@ def get_spacy_model():
     
     if nlp_model is None:
         try:
-            # Use GPU if available
             if torch.cuda.is_available():
                 spacy.prefer_gpu()
-                logger.info("C3: Using GPU for Spacy.")
-            else:
-                logger.info("C3: GPU not available, using CPU.")
-            
-            logger.info(f"C3: Loading Spacy model '{model_name}'...")
             nlp_model = spacy.load(model_name)
         except OSError:
-            logger.warning(f"C3: '{model_name}' not found. Attempting download...")
+            logger.warning(f"C3: '{model_name}' not found. Falling back to 'en_core_web_sm'.")
             try:
-                # Use subprocess to avoid sys.exit() from spacy.cli.download
-                result = subprocess.run(
-                    [sys.executable, "-m", "spacy", "download", model_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=600  # 10 minute timeout for larger model
-                )
-                if result.returncode == 0:
-                    logger.info(f"C3: Successfully downloaded '{model_name}'.")
-                    nlp_model = spacy.load(model_name)
-                else:
-                    logger.error(f"C3: Failed to download '{model_name}': {result.stderr}. Falling back to 'en_core_web_sm'.")
-                    try:
-                        nlp_model = spacy.load("en_core_web_sm")
-                    except OSError:
-                        subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"], capture_output=True)
-                        nlp_model = spacy.load("en_core_web_sm")
-            except Exception as download_error:
-                logger.error(f"C3: Failed to download '{model_name}': {download_error}. Falling back to blank model.")
-                nlp_model = spacy.blank("en")
-                nlp_model.add_pipe("sentencizer")
+                nlp_model = spacy.load("en_core_web_sm")
+            except OSError:
+                subprocess.run([sys.executable, "-m", "spacy", "download", "en_core_web_sm"], capture_output=True)
+                nlp_model = spacy.load("en_core_web_sm")
         except Exception as e:
-            logger.error(f"C3: Failed to load '{model_name}': {e}. Falling back to blank model.")
+            logger.error(f"C3: Failed to load Spacy: {e}")
             nlp_model = spacy.blank("en")
             nlp_model.add_pipe("sentencizer")
             
     return nlp_model
 
-def is_claim_like(sent) -> bool:
-    """
-    Robust check if a spacy Span/Doc looks like a claim.
-    Criteria:
-    - Length > 5 tokens (ignoring punct)
-    - Must have a Subject and a Verb (ROOT/AUX)
-    - Not a question
-    - Not a fragment (must be a complete sentence)
-    - Bonus: Contains Named Entities (PERSON, ORG, GPE, DATE, EVENT)
-    """
-    # Filter out punctuation/space
-    tokens = [t for t in sent if not t.is_punct and not t.is_space]
+class LLMClaimExtractor:
+    """Extracts claims using Google Gemini LLM for context awareness."""
     
-    if len(tokens) < 5:
-        return False
-    
-    # Check if it ends with a question mark
-    if sent.text.strip().endswith('?'):
-        return False
+    def __init__(self):
+        self.api_key = os.environ.get("GOOGLE_API_KEY")
+        if self.api_key:
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
+        else:
+            self.model = None
+            logger.warning("C3: GOOGLE_API_KEY not found. LLM extraction disabled.")
+
+    def extract(self, transcript: str, ocr_text: str) -> List[Dict[str, Any]]:
+        if not self.model:
+            return []
+
+        prompt = f"""
+        You are an expert fact-checker. Your task is to extract factual claims from the following video transcript and on-screen text (OCR).
         
-    # POS Tag and Dependency check
-    if sent[0].has_vector or sent[0].pos_: 
-        has_verb = any(t.pos_ in ["VERB", "AUX"] for t in sent)
-        has_subj = any(t.dep_ in ["nsubj", "nsubjpass", "csubj", "csubjpass"] for t in sent)
+        CRITICAL INSTRUCTION:
+        - If the transcript says "this graph" or "as seen here", use the OCR text to resolve what is being shown.
+        - Combine the spoken claim with the visual context to create a standalone, verifiable statement.
+        - Extract only factual claims that can be verified (stats, events, scientific facts).
+        - Ignore opinions or subjective statements.
         
-        if not (has_verb and has_subj):
-            return False
-            
-    # Named Entity Check - Claims often involve entities
-    has_entity = len(sent.ents) > 0
-    
-    # If no entities, be stricter about length
-    if not has_entity and len(tokens) < 8:
-        return False
-            
-    return True
+        TRANSCRIPT:
+        {transcript[:15000]}
+        
+        OCR / ON-SCREEN TEXT:
+        {ocr_text[:5000]}
+        
+        Return a JSON list of objects with keys: "claim_text", "confidence" (0.0-1.0), "source" ("transcript+ocr", "transcript", or "ocr").
+        Example: [{{"claim_text": "The US inflation rate in 2022 was 8.5%", "confidence": 0.95, "source": "transcript+ocr"}}]
+        """
+        
+        try:
+            response = self.model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+            return json.loads(response.text)
+        except Exception as e:
+            logger.error(f"C3: LLM Extraction failed: {e}")
+            return []
 
 def run(state: dict) -> dict:
     """
-    C3 Node: Claim Extraction (Robust Transformer Version)
-    
-    Extracts claims from:
-    1. Transcript (from A2)
-    2. OCR Results (from V2)
+    C3 Node: Claim Extraction (LLM + Robust Fallback)
     """
-    print("--- C3: Claim Extraction (Robust Transformer) ---")
+    print("--- C3: Claim Extraction (LLM Enhanced) ---")
     
     transcript = state.get("transcript", "")
     ocr_results = state.get("ocr_results", [])
     
-    nlp = get_spacy_model()
-    claims = []
-    
-    # 1. Extract from Transcript
-    if transcript:
-        doc = nlp(transcript)
-        for sent in doc.sents:
-            if is_claim_like(sent):
-                claims.append({
-                    "claim_text": sent.text.strip(),
-                    "source": "transcript",
-                    "confidence": 0.9 if len(sent.ents) > 0 else 0.8
-                })
-    
-    # 2. Extract from OCR
+    # Flatten OCR results to single string for context
+    ocr_text_list = []
     if ocr_results:
         for item in ocr_results:
-            text = ""
-            if isinstance(item, str):
-                text = item
-            elif isinstance(item, dict):
-                text = item.get("text", "")
-            
-            if text:
-                # OCR text might be fragmented. Process it as a doc.
-                doc = nlp(text)
-                for sent in doc.sents:
-                    if is_claim_like(sent):
-                         claims.append({
-                            "claim_text": sent.text.strip(),
-                            "source": "ocr",
-                            "confidence": 0.8 if len(sent.ents) > 0 else 0.7
-                        })
-
-    # Deduplicate claims
-    unique_claims = []
-    seen_texts = set()
-    # Sort by confidence first
-    claims.sort(key=lambda x: x["confidence"], reverse=True)
+            if isinstance(item, str): ocr_text_list.append(item)
+            elif isinstance(item, dict): ocr_text_list.append(item.get("text", ""))
+    ocr_context = "\n".join(ocr_text_list)
     
+    claims = []
+    
+    # 1. Try LLM Extraction (Primary)
+    llm_extractor = LLMClaimExtractor()
+    if llm_extractor.model:
+        print("   Attempting LLM extraction...")
+        claims = llm_extractor.extract(transcript, ocr_context)
+        if claims:
+            print(f"   ✅ LLM extracted {len(claims)} claims.")
+    
+    # 2. Fallback to Spacy (Secondary)
+    if not claims:
+        print("   ⚠️ LLM failed or returned nothing. Falling back to Spacy.")
+        nlp = get_spacy_model()
+        doc = nlp(transcript)
+        for sent in doc.sents:
+            # Simple heuristic: > 5 words, has verb/noun
+            if len(sent) > 5 and any(t.pos_ == "VERB" for t in sent):
+                claims.append({
+                    "claim_text": sent.text.strip(),
+                    "source": "transcript_fallback",
+                    "confidence": 0.6
+                })
+        
+        # Add OCR lines as claims if they look like sentences
+        for line in ocr_text_list:
+            if len(line.split()) > 4:
+                claims.append({
+                    "claim_text": line,
+                    "source": "ocr_fallback",
+                    "confidence": 0.5
+                })
+
+    # Deduplicate
+    unique_claims = []
+    seen = set()
     for c in claims:
-        txt = c["claim_text"]
-        if txt not in seen_texts:
+        txt = c.get("claim_text", "").strip()
+        if txt and txt not in seen:
             unique_claims.append(c)
-            seen_texts.add(txt)
+            seen.add(txt)
             
-    # Limit to top N
+    # Limit to top 5
     final_claims = unique_claims[:5]
     
-    if not final_claims and transcript:
-        # Fallback: Just take the first sentence if it's long enough
-        doc = nlp(transcript)
-        sents = list(doc.sents)
-        if sents and len(sents[0]) > 3:
-             final_claims.append({
-                 "claim_text": sents[0].text.strip(),
-                 "source": "transcript_fallback",
-                 "confidence": 0.5
-             })
-             print(f"Fallback: Using first sentence: {sents[0].text.strip()}")
-
     print(f"Extracted {len(final_claims)} claims.")
     for c in final_claims:
-        print(f" - {c['claim_text'][:50]}... (Conf: {c['confidence']})")
+        print(f" - {c['claim_text'][:60]}... (Conf: {c.get('confidence', 0)})")
 
     state["claims"] = final_claims
     return state

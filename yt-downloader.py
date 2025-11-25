@@ -18,12 +18,13 @@ def download_video(url):
     
     if ffmpeg_location:
         print(f"FFmpeg found at: {ffmpeg_location}")
-        print("Downloading highest quality (video+audio merged)...")
+        print("Downloading highest quality H.264 video (most compatible)...")
         ydl_opts = {
-            'format': 'bestvideo+bestaudio/best',
+            # Prefer AVC (H.264) video and AAC audio for maximum compatibility
+            'format': 'bestvideo[vcodec^=avc]+bestaudio[acodec^=mp4a]/best[ext=mp4]/best',
             'merge_output_format': 'mp4',
             'outtmpl': 'videos/%(title)s.%(ext)s',
-            'ffmpeg_location': ffmpeg_location,  # Explicitly set ffmpeg binary path
+            'ffmpeg_location': ffmpeg_location,
             'postprocessors': [{
                 'key': 'FFmpegVideoConvertor',
                 'preferedformat': 'mp4',
