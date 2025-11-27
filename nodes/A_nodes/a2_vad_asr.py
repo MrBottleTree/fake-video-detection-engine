@@ -22,7 +22,7 @@ def run(state: dict) -> dict:
 
     try:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Using device: {device}")
+        print(f"Node A2: Whisper running on {device.upper()}")
         model = whisper.load_model("base", device=device)
         
         print(f"Transcribing {audio_path}...")

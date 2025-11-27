@@ -17,31 +17,11 @@ def get_verdict(score: float) -> str:
         return "Unverified"
 
 def run(state: dict) -> dict:
-    """
-    E3 Node: Claim Evidence Scorer
-    
-    Aggregates the reliability scores of evidence from E2 to determine a final
-    score and verdict for each claim.
-    
-    Input state expectation:
-    state["evidence"] = [
-        {"claim_text": "...", "reliability_score": 0.8, ...},
-        ...
-    ]
-    state["claims"] = ["claim1", "claim2", ...] (or list of dicts)
-    
-    Output state update:
-    state["claims"] = [
-        {"text": "claim1", "evidence_score": 0.8, "verdict": "Highly Likely", "evidence_count": 5},
-        ...
-    ]
-    """
-    print("--- E3: Claim Evidence Scorer ---")
+    print("E3: Claim Evidence Scorer")
     
     evidence_list = state.get("evidence", [])
     claims_input = state.get("claims", [])
     
-    # Normalize claims input to a list of dicts if it's a list of strings
     claims_data = []
     if claims_input and isinstance(claims_input[0], str):
         claims_data = [{"text": c} for c in claims_input]

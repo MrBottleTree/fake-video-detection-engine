@@ -63,9 +63,11 @@ def run(state: dict) -> dict:
             net.setInput(dummy_blob)
             net.forward()
             
+            print("Node V1: Face Detection running on CUDA")
             if debug:
                 print("[DEBUG] V1: CUDA backend successfully initialized.")
         except Exception as e:
+            print(f"Node V1: Face Detection running on CPU (CUDA failed or unavailable: {e})")
             if debug:
                 print(f"[DEBUG] V1: CUDA backend failed ({e}), falling back to CPU.")
             net.setPreferableBackend(cv2.dnn.DNN_BACKEND_DEFAULT)

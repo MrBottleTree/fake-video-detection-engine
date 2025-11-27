@@ -3,13 +3,20 @@ import spacy
 import torch
 import subprocess
 import sys
+import json
+import requests
+import os
+from dotenv import load_dotenv
 
-# Configure logging
+load_dotenv()
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Global model cache to avoid reloading
 nlp_model = None
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = "gpt-4o"
 
 def get_spacy_model():
     global nlp_model
@@ -17,7 +24,6 @@ def get_spacy_model():
     
     if nlp_model is None:
         try:
-            # Use GPU if available
             if torch.cuda.is_available():
                 spacy.prefer_gpu()
                 logger.info("C3: Using GPU for Spacy.")
@@ -29,12 +35,11 @@ def get_spacy_model():
         except OSError:
             logger.warning(f"C3: '{model_name}' not found. Attempting download...")
             try:
-                # Use subprocess to avoid sys.exit() from spacy.cli.download
                 result = subprocess.run(
                     [sys.executable, "-m", "spacy", "download", model_name],
                     capture_output=True,
                     text=True,
-                    timeout=600  # 10 minute timeout for larger model
+                    timeout=600
                 )
                 if result.returncode == 0:
                     logger.info(f"C3: Successfully downloaded '{model_name}'.")
@@ -94,79 +99,155 @@ def is_claim_like(sent) -> bool:
             
     return True
 
+def extract_claims_openai(transcript: str, ocr_results: list) -> list:
+    """
+    Uses OpenAI API to extract factual claims from transcript and OCR text.
+    """
+    logger.info("C3: Attempting OpenAI Fallback for Claim Extraction...")
+    
+    ocr_text = ""
+    for item in ocr_results:
+        if isinstance(item, str):
+            ocr_text += item + "\n"
+        elif isinstance(item, dict):
+            ocr_text += item.get("text", "") + "\n"
+            
+    prompt = f"""
+    You are a fact-checking assistant. Extract verifiable factual claims from the following text sources.
+    
+    TRANSCRIPT:
+    {transcript[:4000]}  # Limit context window
+    
+    ON-SCREEN TEXT (OCR):
+    {ocr_text[:2000]}
+    
+    Instructions:
+    1. Identify specific, factual claims that can be verified (e.g., statistics, events, quotes, scientific facts).
+    2. Ignore opinions, questions, or vague statements.
+    3. Return a JSON object with a key "claims" containing a list of strings.
+    4. If no claims are found, return {{"claims": []}}.
+    """
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {OPENAI_API_KEY}"
+    }
+    
+    payload = {
+        "model": OPENAI_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"}
+    }
+    
+    try:
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        result = json.loads(content)
+        claims = result.get("claims", [])
+        
+        formatted_claims = []
+        for txt in claims:
+            formatted_claims.append({
+                "claim_text": txt,
+                "source": "openai_fallback",
+                "confidence": 0.95
+            })
+        return formatted_claims
+        
+    except Exception as e:
+        logger.error(f"C3: OpenAI API request failed: {e}")
+        return []
+
 def run(state: dict) -> dict:
     """
-    C3 Node: Claim Extraction (Robust Transformer Version)
+    C3 Node: Claim Extraction (OpenAI Primary with Robust Transformer Fallback)
     
     Extracts claims from:
     1. Transcript (from A2)
     2. OCR Results (from V2)
     """
-    print("--- C3: Claim Extraction (Robust Transformer) ---")
+    print("--- C3: Claim Extraction (OpenAI Primary) ---")
     
     transcript = state.get("transcript", "")
     ocr_results = state.get("ocr_results", [])
     
-    nlp = get_spacy_model()
-    claims = []
+    final_claims = []
     
-    # 1. Extract from Transcript
-    if transcript:
-        doc = nlp(transcript)
-        for sent in doc.sents:
-            if is_claim_like(sent):
-                claims.append({
-                    "claim_text": sent.text.strip(),
-                    "source": "transcript",
-                    "confidence": 0.9 if len(sent.ents) > 0 else 0.8
-                })
+    # 1. Try OpenAI First
+    print("C3: Attempting OpenAI Claim Extraction...")
+    openai_claims = extract_claims_openai(transcript, ocr_results)
     
-    # 2. Extract from OCR
-    if ocr_results:
-        for item in ocr_results:
-            text = ""
-            if isinstance(item, str):
-                text = item
-            elif isinstance(item, dict):
-                text = item.get("text", "")
-            
-            if text:
-                # OCR text might be fragmented. Process it as a doc.
-                doc = nlp(text)
-                for sent in doc.sents:
-                    if is_claim_like(sent):
-                         claims.append({
-                            "claim_text": sent.text.strip(),
-                            "source": "ocr",
-                            "confidence": 0.8 if len(sent.ents) > 0 else 0.7
-                        })
+    if openai_claims:
+        final_claims = openai_claims
+        print(f"C3: OpenAI successfully extracted {len(final_claims)} claims.")
+    else:
+        print("C3: OpenAI extraction failed or returned no claims. Falling back to local SpaCy model...")
+        
+        # 2. Fallback to SpaCy
+        nlp = get_spacy_model()
+        claims = []
+        
+        # Extract from Transcript
+        if transcript:
+            doc = nlp(transcript)
+            for sent in doc.sents:
+                if is_claim_like(sent):
+                    claims.append({
+                        "claim_text": sent.text.strip(),
+                        "source": "transcript_fallback",
+                        "confidence": 0.9 if len(sent.ents) > 0 else 0.8
+                    })
+        
+        # Extract from OCR
+        if ocr_results:
+            for item in ocr_results:
+                text = ""
+                if isinstance(item, str):
+                    text = item
+                elif isinstance(item, dict):
+                    text = item.get("text", "")
+                
+                if text:
+                    doc = nlp(text)
+                    for sent in doc.sents:
+                        if is_claim_like(sent):
+                             claims.append({
+                                "claim_text": sent.text.strip(),
+                                "source": "ocr_fallback",
+                                "confidence": 0.8 if len(sent.ents) > 0 else 0.7
+                            })
 
-    # Deduplicate claims
-    unique_claims = []
-    seen_texts = set()
-    # Sort by confidence first
-    claims.sort(key=lambda x: x["confidence"], reverse=True)
+        # Deduplicate claims
+        unique_claims = []
+        seen_texts = set()
+        claims.sort(key=lambda x: x["confidence"], reverse=True)
+        
+        for c in claims:
+            txt = c["claim_text"]
+            if txt not in seen_texts:
+                unique_claims.append(c)
+                seen_texts.add(txt)
+                
+        final_claims = unique_claims[:5]
     
-    for c in claims:
-        txt = c["claim_text"]
-        if txt not in seen_texts:
-            unique_claims.append(c)
-            seen_texts.add(txt)
-            
-    # Limit to top N
-    final_claims = unique_claims[:5]
-    
+    # 3. Ultimate Fallback
     if not final_claims and transcript:
-        # Fallback: Just take the first sentence if it's long enough
+        print("C3: Both OpenAI and SpaCy failed to find claims. Using first sentence fallback.")
+        nlp = get_spacy_model()
         doc = nlp(transcript)
         sents = list(doc.sents)
         if sents and len(sents[0]) > 3:
              final_claims.append({
                  "claim_text": sents[0].text.strip(),
-                 "source": "transcript_fallback",
+                 "source": "transcript_ultimate_fallback",
                  "confidence": 0.5
              })
-             print(f"Fallback: Using first sentence: {sents[0].text.strip()}")
 
     print(f"Extracted {len(final_claims)} claims.")
     for c in final_claims:
