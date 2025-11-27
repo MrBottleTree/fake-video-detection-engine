@@ -3,7 +3,7 @@ import librosa
 import numpy as np
 
 def run(state: dict) -> dict:
-    print("Node A3: Detecting audio onsets...")
+    print("Node A3: Detecting audio onsets and envelope...")
     audio_path = os.path.join(state.get("data_dir"), "audio_16k.wav")
     debug = state.get("debug", False)
     
@@ -28,6 +28,28 @@ def run(state: dict) -> dict:
         state["audio_onsets"] = onset_times_list
         state["onset_count"] = len(onset_times_list)
         
+        # --- New: Calculate Audio Envelope (RMS) ---
+        # We target a specific FPS if available, otherwise default to 30fps for envelope
+        metadata = state.get("metadata", {})
+        fps = metadata.get("fps", 30.0)
+        duration = metadata.get("duration")
+        
+        hop_length = int(sr / fps)
+        rms = librosa.feature.rms(y=y, frame_length=hop_length*2, hop_length=hop_length, center=True)[0]
+        
+        # Interpolate to match exact number of frames if duration is known
+        if duration:
+            target_frames = int(duration * fps)
+            if len(rms) != target_frames:
+                rms = np.interp(
+                    np.linspace(0, 1, target_frames),
+                    np.linspace(0, 1, len(rms)),
+                    rms
+                )
+        
+        state["audio_envelope"] = rms.tolist()
+        # -------------------------------------------
+        
         if "metadata" not in state:
             state["metadata"] = {}
         state["metadata"]["onset_detection_method"] = "librosa.onset.onset_detect"
@@ -42,5 +64,6 @@ def run(state: dict) -> dict:
         onsets = state.get("audio_onsets", [])
         if onsets:
             print(f"[DEBUG] A3: First 5 Onsets: {onsets[:5]}")
+        print(f"[DEBUG] A3: Audio Envelope Length: {len(state.get('audio_envelope', []))}")
 
     return state
