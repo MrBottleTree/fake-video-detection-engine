@@ -49,12 +49,12 @@ class EvidenceResult(TypedDict):
     date: Optional[str]
     relevance_score: float
 
-class EvidenceOutput(TypedDict):
-    """Structure of the final output for a claim."""
-    claim: Claim
+class EvidenceOutput(EvidenceResult):
+    """Structure of the final flattened output."""
+    claim_id: str
+    claim_text: str
     query_variants: List[str]
-    results: List[EvidenceResult]
-    timestamp: str
+    retrieval_timestamp: str
 
 # --- Node Implementation ---
 
@@ -140,15 +140,19 @@ def run(state: dict) -> dict:
             
             final_results = ranked[:5]
             
-            evidence_results.append({
-                "claim": claim,
-                "query_variants": query_variants,
-                "results": final_results,
-                "timestamp": datetime.now().isoformat()
-            })
+            # Flatten results for downstream nodes (E2, E3)
+            for res in final_results:
+                # Inject claim context into the evidence item
+                flat_item = res.copy()
+                flat_item["claim_id"] = claim["id"]
+                flat_item["claim_text"] = claim["claim_text"]
+                flat_item["query_variants"] = query_variants
+                flat_item["retrieval_timestamp"] = datetime.now().isoformat()
+                
+                evidence_results.append(flat_item)
             
         state["evidence"] = evidence_results
-        print(f"Node E1: Evidence retrieval complete. Found evidence for {len(evidence_results)} claims.")
+        print(f"Node E1: Evidence retrieval complete. Found {len(evidence_results)} total evidence items.")
         
     except Exception as e:
         print(f"Error in E1 node: {e}")
