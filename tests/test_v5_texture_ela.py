@@ -61,7 +61,8 @@ class TestV5TextureELA(unittest.TestCase):
         mock_response.choices[0].message.content = '{"fake_probability": 0.85, "reasoning": "Test reasoning"}'
         mock_client.chat.completions.create.return_value = mock_response
         
-        result = run(self.mock_state)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"}):
+            result = run(self.mock_state)
         
         self.assertIn("texture_ela_score", result)
         self.assertEqual(result["texture_ela_score"], 0.85)
@@ -80,7 +81,8 @@ class TestV5TextureELA(unittest.TestCase):
         mock_openai.return_value = mock_client
         mock_client.chat.completions.create.side_effect = Exception("API Error")
         
-        result = run(self.mock_state)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"}):
+            result = run(self.mock_state)
         
         # Should handle error gracefully
         self.assertEqual(result["texture_ela_score"], 0.0)
