@@ -11,9 +11,12 @@ from nodes.C_nodes import c3_claim_extraction
 class TestC3Extraction(unittest.TestCase):
 
     def setUp(self):
-        # Reset the global model cache before tests if needed, 
-        # but usually we want to keep it to save time.
-        pass
+        # Mock OpenAI extraction to always fail/return empty so we test the SpaCy fallback logic
+        self.patcher = patch('nodes.C_nodes.c3_claim_extraction.extract_claims_openai', return_value=[])
+        self.mock_openai = self.patcher.start()
+        
+    def tearDown(self):
+        self.patcher.stop()
 
     def test_basic_extraction(self):
         """Test extraction of simple valid claims."""
@@ -82,7 +85,7 @@ class TestC3Extraction(unittest.TestCase):
         
         # Check source attribution
         for c in claims:
-            self.assertEqual(c["source"], "ocr")
+            self.assertEqual(c["source"], "ocr_fallback")
 
     def test_fallback_logic(self):
         """Test fallback to first sentence if no valid claims found."""
@@ -96,7 +99,7 @@ class TestC3Extraction(unittest.TestCase):
         claims = result["claims"]
         
         self.assertEqual(len(claims), 1)
-        self.assertEqual(claims[0]["source"], "transcript_fallback")
+        self.assertEqual(claims[0]["source"], "transcript_ultimate_fallback")
         self.assertIn("Hi there my friend", claims[0]["claim_text"])
 
     def test_deduplication(self):

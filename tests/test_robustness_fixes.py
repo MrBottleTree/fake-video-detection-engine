@@ -11,6 +11,14 @@ from nodes.C_nodes import c3_claim_extraction, c1_lip_sync_score
 
 class TestRobustness(unittest.TestCase):
 
+    def setUp(self):
+        # Mock OpenAI extraction to always fail/return empty so we test the SpaCy fallback logic
+        self.patcher = patch('nodes.C_nodes.c3_claim_extraction.extract_claims_openai', return_value=[])
+        self.mock_openai = self.patcher.start()
+        
+    def tearDown(self):
+        self.patcher.stop()
+
     def test_c3_extraction_spacy(self):
         # Test transcript extraction with Spacy
         # We need to handle the case where Spacy model might not be present in the test env
@@ -49,7 +57,7 @@ class TestRobustness(unittest.TestCase):
         claims = result["claims"]
         
         self.assertEqual(len(claims), 1)
-        self.assertEqual(claims[0]["source"], "ocr")
+        self.assertEqual(claims[0]["source"], "ocr_fallback")
 
     def test_c1_windowed_robustness(self):
         # Create synthetic signals

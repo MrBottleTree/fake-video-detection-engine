@@ -118,6 +118,7 @@ def run(state: dict) -> dict:
     try:
         # Initialize Face Alignment in 3D mode (for landmarks/blink)
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"Node V4: Face Alignment/SixDRepNet running on {device.upper()}")
         if debug:
             print(f"[DEBUG] V4: Using device: {device}")
             

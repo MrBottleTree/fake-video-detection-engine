@@ -75,6 +75,7 @@ def run(state: dict) -> dict:
 
     try:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"Node V3: Face Alignment running on {device.upper()}")
         if debug:
             print(f"[DEBUG] V3: Using device: {device}")
         
