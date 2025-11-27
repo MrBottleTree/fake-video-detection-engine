@@ -11,6 +11,7 @@ import imageio_ffmpeg
 from typing import Optional, Dict, Any, TypedDict, Annotated
 import operator
 import warnings
+import subprocess
 warnings.filterwarnings("ignore", message=".*'pin_memory' argument is set as true.*")
 
 def overwrite(left, right):
@@ -230,11 +231,47 @@ app = graph.compile()
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fake Video Detection Engine")
-    parser.add_argument("input_path", help="Path to video file or URL")
+    parser.add_argument("input_path", nargs="?", help="Path to video file or URL (not needed for --frontend mode)")
     parser.add_argument("label", nargs="?", type=int, help="Optional label (0 or 1)")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--frontend", action="store_true", help="Launch Streamlit web interface")
     
     args = parser.parse_args()
+
+    # If frontend mode is requested, launch Streamlit
+    if args.frontend:
+        print("Launching Streamlit frontend...")
+        
+        # Set environment variables for frontend
+        env = os.environ.copy()
+        
+        # Pass video URL if provided
+        if args.input_path:
+            env["STREAMLIT_VIDEO_URL"] = args.input_path
+            print(f"Video URL pre-filled: {args.input_path}")
+        
+        # Pass debug mode if requested
+        if args.debug:
+            env["STREAMLIT_DEBUG_MODE"] = "1"
+            print("Debug mode enabled in frontend.")
+        
+        try:
+            # Launch Streamlit using uv run
+            subprocess.run(
+                ["uv", "run", "streamlit", "run", "app.py"],
+                env=env,
+                cwd=os.path.dirname(os.path.abspath(__file__)) or "."
+            )
+        except KeyboardInterrupt:
+            print("\nStreamlit frontend closed.")
+        except Exception as e:
+            print(f"Error launching Streamlit: {e}")
+            sys.exit(1)
+        return
+
+    # CLI mode - require input_path
+    if not args.input_path:
+        parser.error("input_path is required when not using --frontend mode")
 
     if args.label is not None and args.label not in [0, 1]:
         print("Label must be 0 or 1 if provided.")

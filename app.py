@@ -75,10 +75,14 @@ with st.sidebar:
     st.title("Detector Config")
     
     st.markdown("### 📥 Input Source")
-    input_url = st.text_input("Video URL", "https://www.youtube.com/watch?v=example", help="Enter a YouTube URL or direct video link.")
+    # Check for pre-filled video URL from environment variable
+    default_url = os.environ.get("STREAMLIT_VIDEO_URL", "https://www.youtube.com/watch?v=example")
+    input_url = st.text_input("Video URL", default_url, help="Enter a YouTube URL or direct video link.")
     
     st.markdown("### ⚙️ System Settings")
-    debug_mode = st.toggle("Debug Mode", value=True)
+    # Check for debug mode from environment variable
+    default_debug = os.environ.get("STREAMLIT_DEBUG_MODE", "0") == "1"
+    debug_mode = st.toggle("Debug Mode", value=default_debug)
     show_graph = st.toggle("Show Graph Architecture", value=True)
     
     st.markdown("---")
