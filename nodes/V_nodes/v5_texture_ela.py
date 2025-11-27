@@ -22,11 +22,7 @@ def run(state: dict) -> dict:
         state["texture_ela_details"] = {"reason": "No faces found"}
         return state
 
-    # 1. Select representative faces (up to 3)
-    # Strategy: Pick faces with high confidence and large area from different parts of the video
     sorted_faces = sorted(face_detections, key=lambda x: (x['faces'][0]['confidence'] * x['faces'][0]['bbox']['w'] * x['faces'][0]['bbox']['h']), reverse=True)
-    
-    # Simple selection: Top 3 best faces
     selected_faces = sorted_faces[:3]
     
     ela_dir = os.path.join(output_dir, "ela_analysis")
@@ -34,7 +30,12 @@ def run(state: dict) -> dict:
     
     analysis_results = []
     
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    api_key = os.getenv("OPENAI_API_KEY")
+    client = None
+    if api_key:
+        client = OpenAI(api_key=api_key)
+    else:
+        print("Node V5: OPENAI_API_KEY not found. Skipping OpenAI analysis.")
     
     for i, face_data in enumerate(selected_faces):
         try:
@@ -44,18 +45,14 @@ def run(state: dict) -> dict:
             if not os.path.exists(crop_path):
                 continue
                 
-            # --- ELA Analysis ---
             original = Image.open(crop_path).convert('RGB')
             
-            # Save at 90% quality to a temporary buffer/file
             ela_temp_path = os.path.join(ela_dir, f"temp_ela_{i}.jpg")
             original.save(ela_temp_path, 'JPEG', quality=90)
             compressed = Image.open(ela_temp_path)
             
-            # Calculate difference
             diff = ImageChops.difference(original, compressed)
             
-            # Enhance brightness to make artifacts visible
             extrema = diff.getextrema()
             max_diff = max([ex[1] for ex in extrema])
             if max_diff == 0:
@@ -67,21 +64,17 @@ def run(state: dict) -> dict:
             ela_output_path = os.path.join(ela_dir, f"ela_{i}.jpg")
             enhanced_diff.save(ela_output_path)
             
-            # --- FFT Analysis ---
-            # Convert to grayscale for FFT
             gray_image = cv2.imread(crop_path, cv2.IMREAD_GRAYSCALE)
             f = np.fft.fft2(gray_image)
             fshift = np.fft.fftshift(f)
             magnitude_spectrum = 20 * np.log(np.abs(fshift) + 1)
             
-            # Normalize for visualization
             magnitude_spectrum = cv2.normalize(magnitude_spectrum, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
             
             fft_output_path = os.path.join(ela_dir, f"fft_{i}.jpg")
             cv2.imwrite(fft_output_path, magnitude_spectrum)
             
-            # --- OpenAI Analysis ---
-            if client.api_key:
+            if client:
                 def encode_image(image_path):
                     with open(image_path, "rb") as image_file:
                         return base64.b64encode(image_file.read()).decode('utf-8')
