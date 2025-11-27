@@ -35,12 +35,16 @@ class TestE1Robustness(unittest.TestCase):
         result_state = run(self.mock_state)
         
         self.assertIn("evidence", result_state)
+        # Should now have 2 evidence items (1 per claim, since we mocked 1 search result per claim)
         self.assertEqual(len(result_state["evidence"]), 2)
         
-        # Check ID generation
-        first_claim = result_state["evidence"][0]["claim"]
-        self.assertIn("id", first_claim)
-        self.assertEqual(first_claim["claim_text"], "Python is a programming language.")
+        # Check flattened structure - each evidence item should have claim_text and claim_id
+        first_item = result_state["evidence"][0]
+        self.assertIn("claim_id", first_item)
+        self.assertIn("claim_text", first_item)
+        self.assertEqual(first_item["claim_text"], "Python is a programming language.")
+        self.assertIn("url", first_item)
+        self.assertEqual(first_item["url"], "http://test.com")
 
     def test_smart_queries(self):
         """Test that smart queries (debunking/supporting) are generated."""
