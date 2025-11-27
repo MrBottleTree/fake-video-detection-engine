@@ -42,7 +42,10 @@ class TestA3AudioOnsets(unittest.TestCase):
 
     def test_onset_detection(self):
         print("\nTesting onset detection...")
-        state = {"data_dir": self.test_dir}
+        state = {
+            "data_dir": self.test_dir,
+            "metadata": {"fps": 30.0, "duration": 2.0}
+        }
         
         new_state = a3_audio_onsets.run(state)
         
@@ -55,6 +58,17 @@ class TestA3AudioOnsets(unittest.TestCase):
         
         self.assertTrue(has_onset_1, "Did not detect onset at 0.5s")
         self.assertTrue(has_onset_2, "Did not detect onset at 1.5s")
+        
+        # Verify envelope
+        envelope = new_state.get("audio_envelope")
+        self.assertIsNotNone(envelope)
+        self.assertEqual(len(envelope), int(2.0 * 30.0)) # duration * fps
+        
+        # Check that envelope has peaks around onsets (approx frame indices)
+        # 0.5s * 30fps = 15
+        # 1.5s * 30fps = 45
+        self.assertGreater(envelope[15], 0.1)
+        self.assertGreater(envelope[45], 0.1)
         
         self.assertEqual(new_state["metadata"]["onset_detection_method"], "librosa.onset.onset_detect")
         print("Onset detection test passed.")
