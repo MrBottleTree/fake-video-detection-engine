@@ -10,14 +10,14 @@ from nodes.E_nodes import e3_claim_evidence_scorer
 class TestE3Scorer(unittest.TestCase):
 
     def test_verdict_thresholds(self):
-        self.assertEqual(e3_claim_evidence_scorer.get_verdict(0.8), "Highly Likely")
+        self.assertEqual(e3_claim_evidence_scorer.get_verdict(0.85), "True")
         self.assertEqual(e3_claim_evidence_scorer.get_verdict(0.5), "Likely")
-        self.assertEqual(e3_claim_evidence_scorer.get_verdict(0.3), "Possible")
+        self.assertEqual(e3_claim_evidence_scorer.get_verdict(0.3), "Unlikely")
         self.assertEqual(e3_claim_evidence_scorer.get_verdict(0.1), "Unverified")
 
     def test_aggregation_logic(self):
         # Claim with high reliability evidence
-        claims = ["Claim 1"]
+        claims = [{"claim_text": "Claim 1", "source": "transcript", "confidence": 0.9}]
         evidence = [
             {"claim_text": "Claim 1", "reliability_score": 0.9},
             {"claim_text": "Claim 1", "reliability_score": 0.7}
@@ -29,12 +29,12 @@ class TestE3Scorer(unittest.TestCase):
         scored_claim = result["claims"][0]
         self.assertEqual(scored_claim["text"], "Claim 1")
         self.assertEqual(scored_claim["evidence_count"], 2)
-        # Average of 0.9 and 0.7 is 0.8
-        self.assertAlmostEqual(scored_claim["evidence_score"], 0.8)
+        # New scoring blends support, median, diversity; expect >0.7
+        self.assertAlmostEqual(scored_claim["evidence_score"], 0.77, places=2)
         self.assertEqual(scored_claim["verdict"], "Highly Likely")
 
     def test_no_evidence(self):
-        claims = ["Claim 1"]
+        claims = [{"claim_text": "Claim 1", "source": "transcript", "confidence": 0.6}]
         evidence = []
         state = {"claims": claims, "evidence": evidence}
         
@@ -46,7 +46,10 @@ class TestE3Scorer(unittest.TestCase):
         self.assertEqual(scored_claim["verdict"], "Unverified")
 
     def test_mixed_claims(self):
-        claims = ["Claim 1", "Claim 2"]
+        claims = [
+            {"claim_text": "Claim 1", "source": "transcript", "confidence": 0.8},
+            {"claim_text": "Claim 2", "source": "ocr", "confidence": 0.6},
+        ]
         evidence = [
             {"claim_text": "Claim 1", "reliability_score": 0.8},
             {"claim_text": "Claim 2", "reliability_score": 0.1}
