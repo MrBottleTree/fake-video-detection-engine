@@ -31,16 +31,18 @@ class TestE1Robustness(unittest.TestCase):
         ]
         instance.deduplicate.return_value = instance.search_robust.return_value
         instance.rank_results.return_value = instance.search_robust.return_value
+        instance.rerank_cross_encoder.return_value = instance.search_robust.return_value
+        instance.cap_per_domain.return_value = instance.search_robust.return_value
+        instance.attach_stance.return_value = [{"stance": "support", **instance.search_robust.return_value[0]}]
 
         result_state = run(self.mock_state)
         
         self.assertIn("evidence", result_state)
         self.assertEqual(len(result_state["evidence"]), 2)
-        
-        # Check ID generation
-        first_claim = result_state["evidence"][0]["claim"]
-        self.assertIn("id", first_claim)
-        self.assertEqual(first_claim["claim_text"], "Python is a programming language.")
+        first_evidence = result_state["evidence"][0]
+        self.assertIn("claim_id", first_evidence)
+        self.assertEqual(first_evidence["claim_text"], "Python is a programming language.")
+        self.assertEqual(first_evidence["stance"], "support")
 
     def test_smart_queries(self):
         """Test that smart queries (debunking/supporting) are generated."""
