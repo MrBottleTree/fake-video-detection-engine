@@ -3,12 +3,33 @@ import os
 import urllib.parse
 import urllib.request
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import Counter
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# OpenAI Configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = "gpt-4o"
+
+# Initialize OpenAI client if API key is available
+openai_client = None
+if OPENAI_API_KEY:
+    try:
+        openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        logger.info("E2: OpenAI client initialized successfully")
+    except Exception as e:
+        logger.warning(f"E2: Failed to initialize OpenAI client: {e}")
+        openai_client = None
+else:
+    logger.info("E2: OPENAI_API_KEY not found, will use heuristic scoring only")
 
 def load_trusted_sources(assets_dir: str = "assets") -> Dict[str, List[str]]:
     """Loads trusted sources from a JSON file."""
@@ -90,26 +111,117 @@ def check_about_page(url: str) -> bool:
         logger.debug(f"Error checking about page for {url}: {e}")
         return False
 
+def evaluate_source_reliability_openai(domain: str, url: str, snippet: str, claim_text: str) -> Optional[Dict[str, Any]]:
+    """
+    Uses OpenAI to evaluate the reliability of a source based on multiple factors.
+    
+    Args:
+        domain: The domain of the source
+        url: The full URL of the source
+        snippet: A snippet of the content from the source
+        claim_text: The claim being verified
+        
+    Returns:
+        Dict with 'score' (float 0-1) and 'reason' (str), or None if evaluation fails
+    """
+    if not openai_client:
+        return None
+        
+    try:
+        prompt = f"""You are an expert fact-checker evaluating source reliability. Analyze this source and provide a reliability score.
+
+SOURCE DETAILS:
+- Domain: {domain}
+- URL: {url}
+- Claim being verified: {claim_text}
+- Content snippet: {snippet[:500]}
+
+EVALUATION CRITERIA:
+1. Domain authority and reputation (e.g., .gov, .edu, known news outlets)
+2. Content quality and factual accuracy indicators
+3. Presence of citations, references, or evidence
+4. Objectivity vs bias indicators
+5. Professionalism and credibility markers
+
+Provide a reliability score from 0.0 (completely unreliable) to 1.0 (highly reliable).
+
+Common examples:
+- Government sites (.gov, .mil): 0.9-1.0
+- Academic institutions (.edu): 0.8-0.95
+- Major news outlets (Reuters, AP, BBC): 0.75-0.9
+- Wikipedia: 0.7-0.8
+- Personal blogs with good citations: 0.5-0.7
+- Clickbait or sensationalist sites: 0.2-0.4
+- Known misinformation sources: 0.0-0.2
+
+Return ONLY a JSON object with this exact structure:
+{{"score": 0.85, "reason": "Brief explanation of the score"}}"""
+
+        response = openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that outputs JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            response_format={"type": "json_object"}
+        )
+        
+        content = response.choices[0].message.content
+        result = json.loads(content)
+        
+        # Validate the response
+        if "score" not in result or not isinstance(result["score"], (int, float)):
+            logger.warning(f"E2: Invalid OpenAI response format: {result}")
+            return None
+            
+        # Ensure score is in valid range
+        score = max(0.0, min(1.0, float(result["score"])))
+        reason = result.get("reason", "No reason provided")
+        
+        logger.info(f"E2: OpenAI scored {domain} as {score:.2f} - {reason}")
+        return {"score": score, "reason": reason}
+        
+    except Exception as e:
+        logger.error(f"E2: OpenAI evaluation failed for {domain}: {e}")
+        return None
+
 def calculate_reliability_score(evidence_item: Dict[str, Any], trusted_sources: Dict[str, List[str]], claim_consensus_map: Dict[str, int]) -> Dict[str, Any]:
-    """Calculates the reliability score for a single evidence item."""
+    """Calculates the reliability score for a single evidence item using OpenAI (primary) or heuristics (fallback)."""
     
     url = evidence_item.get("url", "")
-    claim_text = evidence_item.get("claim_text", "") # Assuming this links back to a claim
-    
-    score = 0.5 # Base score
-    details = []
+    claim_text = evidence_item.get("claim_text", "")
+    snippet = evidence_item.get("snippet", "")
     
     if not url:
         return {"score": 0.0, "details": ["No URL provided"]}
 
     domain = get_domain(url)
     
+    # Try OpenAI evaluation first
+    if openai_client:
+        logger.debug(f"E2: Attempting OpenAI evaluation for {domain}")
+        openai_result = evaluate_source_reliability_openai(domain, url, snippet, claim_text)
+        
+        if openai_result:
+            return {
+                "score": openai_result["score"],
+                "details": [f"OpenAI: {openai_result['reason']}"]
+            }
+        else:
+            logger.info(f"E2: OpenAI evaluation failed for {domain}, falling back to heuristics")
+    
+    # Fallback to heuristic scoring
+    logger.debug(f"E2: Using heuristic scoring for {domain}")
+    score = 0.5  # Base score
+    details = []
+    
     # 1. Domain TLD Check
     if domain.endswith(".gov") or domain.endswith(".mil"):
         score += 0.4
         details.append("Government/Military domain (+0.4)")
     elif domain.endswith(".edu"):
-        score += 0.3 # Slightly less than gov
+        score += 0.3  # Slightly less than gov
         details.append("Educational domain (+0.3)")
         
     # 2. Trusted List Check
