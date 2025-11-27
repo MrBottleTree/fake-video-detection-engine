@@ -35,12 +35,18 @@ class TestRobustness(unittest.TestCase):
             if i > 0 and signal[i-1] < 0.9 and signal[i] >= 0.9:
                 audio_onsets.append(t[i])
                 
-        # Corrupt the last 5 seconds
-        audio_onsets = [a for a in audio_onsets if a < 5.0]
+        # Generate continuous audio signal (envelope)
+        # Match the mouth signal (perfect sync initially)
+        audio_signal = (signal + 1) / 2
+        
+        # Corrupt the last 5 seconds (silence)
+        half_frames = num_frames // 2
+        audio_signal[half_frames:] = 0.0
         
         state = {
             "mouth_landmarks": mouth_landmarks,
-            "audio_onsets": audio_onsets,
+            "audio_onsets": audio_onsets, # Keep for backward compat if needed, but c1 ignores it now
+            "test_audio_signal": audio_signal.tolist(),
             "metadata": {"fps": fps, "duration": duration}
         }
         
