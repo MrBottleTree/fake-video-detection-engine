@@ -8,15 +8,12 @@ from PIL import Image
 from main import app as graph_app
 from main import State
 
-# Page Config
 st.set_page_config(
     page_title="Deepfake Detection Engine",
-    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- Custom CSS for "Professional/Glass" Look ---
 st.markdown("""
 <style>
     /* Main Background */
@@ -69,68 +66,62 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- Sidebar Configuration ---
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/security-checked.png", width=60)
     st.title("Detector Config")
     
-    st.markdown("### 📥 Input Source")
-    # Check for pre-filled video URL from environment variable
+    st.markdown("### Input Source")
     default_url = os.environ.get("STREAMLIT_VIDEO_URL", "https://www.youtube.com/watch?v=example")
     input_url = st.text_input("Video URL", default_url, help="Enter a YouTube URL or direct video link.")
     
-    st.markdown("### ⚙️ System Settings")
-    # Check for debug mode from environment variable
+    st.markdown("### System Settings")
     default_debug = os.environ.get("STREAMLIT_DEBUG_MODE", "0") == "1"
     debug_mode = st.toggle("Debug Mode", value=default_debug)
     show_graph = st.toggle("Show Graph Architecture", value=True)
     
     st.markdown("---")
-    st.markdown("### 📊 System Status")
+    st.markdown("### System Status")
     status_indicator = st.empty()
     status_indicator.success("System Ready")
     
-    if st.button("🧹 Clear Cache", use_container_width=True):
+    if st.button("Clear Cache", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
     st.markdown("---")
     st.caption("v2.0.0 | Agentic AI Engine")
 
-# --- Main Content ---
-st.title("🛡️ Deepfake Detection Engine")
+st.title("Deepfake Detection Engine")
 st.markdown("#### Advanced Multi-Modal Verification System")
 
-# Session State Initialization
 if "processing" not in st.session_state:
     st.session_state.processing = False
 if "result_state" not in st.session_state:
     st.session_state.result_state = None
 if "graph_image" not in st.session_state:
     try:
-        st.session_state.graph_image = graph_app.get_graph().draw_mermaid_png()
+        st.session_state.graph_image = graph_app.get_graph().draw_mermaid_png(
+            max_retries=5,
+            retry_delay=2.0
+        )
     except Exception as e:
         st.warning(f"Could not render graph visualization: {e}")
         st.session_state.graph_image = None
 
-# --- Graph Architecture View ---
 if show_graph and st.session_state.graph_image:
-    with st.expander("🕸️ Execution Graph Architecture", expanded=False):
+    with st.expander("Execution Graph Architecture", expanded=False):
         st.image(st.session_state.graph_image, caption="LangGraph Execution Flow", use_column_width=True)
 
-# --- Execution Logic ---
 def run_analysis():
     st.session_state.processing = True
     st.session_state.result_state = None
     status_indicator.info("Processing...")
     
-    # Initial State
     initial_state = {
         "input_path": input_url,
         "debug": debug_mode
     }
     
-    # Layout for Progress
     col1, col2 = st.columns([2, 1])
     
     with col1:
@@ -140,10 +131,8 @@ def run_analysis():
     with col2:
         node_status = st.empty()
     
-    # Log Container
-    log_expander = st.expander("📜 Live Execution Logs", expanded=True)
+    log_expander = st.expander("Live Execution Logs", expanded=True)
     
-    # Nodes list for progress tracking
     nodes_order = ["IN", "A1", "V1", "A2", "A3", "V2", "V3", "V4", "V5", "C1", "C2", "C3", "E1", "E2", "E3", "LR"]
     total_steps = len(nodes_order)
     current_step = 0
@@ -153,33 +142,30 @@ def run_analysis():
         with log_expander:
             st.code("Initializing Graph Execution...", language="bash")
             
-            # Stream execution
             for output in graph_app.stream(initial_state):
                 for node_name, state_update in output.items():
                     current_step += 1
                     progress = min(current_step / total_steps, 1.0)
                     progress_bar.progress(progress)
                     
-                    # Update Status
                     current_stage.markdown(f"**Executing Node:** `{node_name}`")
                     node_status.success(f"Completed: {node_name}")
                     
-                    # Log specific interesting events
                     if "claims" in state_update:
                         count = len(state_update['claims'])
-                        st.write(f"ℹ️ **{node_name}**: Extracted {count} claims.")
+                        st.write(f"**{node_name}**: Extracted {count} claims.")
                     if "fake_probability" in state_update:
                         prob = state_update['fake_probability']
-                        st.write(f"⚠️ **{node_name}**: Intermediate Fake Prob: {prob:.2%}")
+                        st.write(f"**{node_name}**: Intermediate Fake Prob: {prob:.2%}")
                         
                     final_state = state_update
                     
             progress_bar.progress(1.0)
-            current_stage.markdown("**✅ Analysis Complete**")
+            current_stage.markdown("**Analysis Complete**")
             status_indicator.success("Analysis Complete")
             
     except Exception as e:
-        st.error(f"❌ Critical Error during execution: {e}")
+        st.error(f"Critical Error during execution: {e}")
         st.session_state.processing = False
         status_indicator.error("System Error")
         return
@@ -187,21 +173,18 @@ def run_analysis():
     st.session_state.processing = False
     st.session_state.result_state = final_state
 
-# --- Action Button ---
-if st.button("🚀 Start Deepfake Analysis", disabled=st.session_state.processing, use_container_width=True):
+if st.button("Start Deepfake Analysis", disabled=st.session_state.processing, use_container_width=True):
     if not input_url:
         st.warning("Please enter a valid Video URL.")
     else:
         run_analysis()
 
-# --- Results Dashboard ---
 if st.session_state.result_state:
     state = st.session_state.result_state
     
     st.markdown("---")
-    st.subheader("📊 Analysis Report")
+    st.subheader("Analysis Report")
     
-    # 1. Verdict Section
     fake_prob = state.get("fake_probability", 0.0)
     verdict = "FAKE" if fake_prob > 0.5 else "REAL"
     confidence = fake_prob if verdict == "FAKE" else (1 - fake_prob)
@@ -214,12 +197,11 @@ if st.session_state.result_state:
     </div>
     """, unsafe_allow_html=True)
     
-    # 2. Detailed Tabs
     tab_video, tab_claims, tab_bio, tab_data = st.tabs([
-        "📺 Video Analysis", 
-        "⚖️ Claims & Evidence", 
-        "🧬 Biometrics", 
-        "💾 Raw Data"
+        "Video Analysis", 
+        "Claims & Evidence", 
+        "Biometrics", 
+        "Raw Data"
     ])
     
     with tab_video:
@@ -244,13 +226,12 @@ if st.session_state.result_state:
                 with st.expander(f"Claim #{i+1}: {c.get('verdict', 'Unknown')} ({c.get('evidence_score', 0):.2f})"):
                     st.markdown(f"**Claim:** *\"{c.get('text')}\"*")
                     
-                    # Evidence
                     evidence = state.get("evidence", [])
                     related_ev = [e for e in evidence if e.get("claim_text") == c.get("text")]
                     
                     if related_ev:
                         st.markdown("---")
-                        st.markdown("**🔍 Evidence Sources:**")
+                        st.markdown("**Evidence Sources:**")
                         for rev in related_ev:
                             rel_score = rev.get('reliability_score', 0)
                             col_a, col_b = st.columns([4, 1])
