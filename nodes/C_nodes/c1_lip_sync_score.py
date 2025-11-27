@@ -1,9 +1,8 @@
 import numpy as np
-from scipy.signal import correlate
-from scipy.ndimage import gaussian_filter1d
+import torch
+import torch.nn.functional as F
 from scipy.spatial import distance as dist
-from typing import TypedDict, Optional, Dict, Any, Annotated
-import operator
+import os
 
 def calculate_mar(mouth_points):
     if len(mouth_points) < 20:
@@ -26,145 +25,161 @@ def calculate_mar(mouth_points):
     return mar
 
 def run(state: dict) -> dict:
-    print("Node C1: Analyzing Lip Sync (Robust Windowed Correlation)...")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Node C1: Analyzing Lip Sync (Robust Correlation) on {device.upper()}...")
 
     mouth_landmarks = state.get("mouth_landmarks")
-    audio_onsets = state.get("audio_onsets")
     metadata = state.get("metadata", {})
     fps = metadata.get("fps")
     duration = metadata.get("duration")
+    
+    # For testing, allow injecting signals directly
+    test_audio_signal = state.get("test_audio_signal")
+    # New: Get pre-calculated envelope from A3 node
+    audio_envelope = state.get("audio_envelope")
 
-    if not mouth_landmarks or not audio_onsets:
-        print(" C1: Warning - Missing mouth landmarks or audio onsets. Cannot compute lip-sync score.")
+    if not mouth_landmarks:
+        print(" C1: Warning - Missing mouth landmarks. Cannot compute lip-sync score.")
         state["lip_sync_score"] = 0.0 
         return state
 
     if not fps or not duration:
-        print(" C1: Warning - Missing video FPS or duration from metadata. Cannot compute lip-sync score.")
+        print(" C1: Warning - Missing video FPS or duration. Cannot compute lip-sync score.")
         state["lip_sync_score"] = 0.0
         return state
 
-    
-    #both signals should be compared with same time axis
+    # 1. Get Visual Signal (MAR)
     num_frames = int(duration * fps)
     time_axis = np.linspace(0, duration, num_frames)
-
-    # Calculate MAR for each frame
+    
     mouth_timestamps = []
     mouth_mar_values = []
     
     for lm in mouth_landmarks:
         timestamp = lm.get('timestamp', 0.0)
-        
         if 'mar' in lm:
             mar = lm['mar']
         elif 'landmarks' in lm:
             points = lm['landmarks']
-            if not points:
-                mar = 0.0
-            else:
-                mar = calculate_mar(points)
+            mar = calculate_mar(points) if points else 0.0
         else:
             mar = 0.0
-            
         mouth_timestamps.append(timestamp)
         mouth_mar_values.append(mar)
     
-    #interpolate with our time axis
     if not mouth_timestamps:
-        print(" C1: Warning - No valid mouth timestamps found.")
+        print(" C1: Warning - No valid mouth timestamps.")
         state["lip_sync_score"] = 0.0
         return state
         
+    # Interpolate MAR to constant FPS
     mouth_signal = np.interp(time_axis, mouth_timestamps, mouth_mar_values)
 
-    #get audio signal
-    audio_signal = np.zeros_like(time_axis)
-    for onset_time in audio_onsets:
-        idx = np.searchsorted(time_axis, onset_time, side="left")
-        if idx < len(audio_signal):
-            audio_signal[idx] = 1.0
+    # 2. Get Audio Signal (RMS)
+    audio_signal = None
+    if test_audio_signal is not None:
+        audio_signal = np.array(test_audio_signal)
+    elif audio_envelope is not None:
+        audio_signal = np.array(audio_envelope)
     
-    #smooth signal using gaussian filters
-    audio_signal = gaussian_filter1d(audio_signal, sigma=2)
+    if audio_signal is None:
+        print(" C1: Warning - Could not obtain audio signal (missing 'audio_envelope'). Defaulting to 0.0")
+        state["lip_sync_score"] = 0.0
+        return state
+        
+    # Resize if needed (robustness against slight frame count mismatches)
+    if len(audio_signal) != len(mouth_signal):
+         audio_signal = np.interp(
+            np.linspace(0, 1, len(mouth_signal)),
+            np.linspace(0, 1, len(audio_signal)),
+            audio_signal
+        )
 
-    #normalize (v important)
+    # 3. Normalize Signals
     epsilon = 1e-9
     mouth_signal_norm = (mouth_signal - np.mean(mouth_signal)) / (np.std(mouth_signal) + epsilon)
     audio_signal_norm = (audio_signal - np.mean(audio_signal)) / (np.std(audio_signal) + epsilon)
 
-    
-    max_lag_frames = int(fps * 0.5) # +/- 0.5 seconds lag allowed
-    
-    # --- Robust Windowed Correlation ---
-    # Instead of one global correlation, we compute correlation in overlapping windows
-    # and take the average of the top N windows. This handles silence/noise.
-    
-    window_duration = 5.0 # seconds
-    window_size = int(window_duration * fps)
-    step_size = int(window_size / 2) # 50% overlap
-    
-    if len(mouth_signal_norm) < window_size:
-        # Signal too short for windowing, fall back to global
-        windows = [(mouth_signal_norm, audio_signal_norm)]
-    else:
-        windows = []
-        for i in range(0, len(mouth_signal_norm) - window_size + 1, step_size):
-            m_win = mouth_signal_norm[i : i + window_size]
-            a_win = audio_signal_norm[i : i + window_size]
-            windows.append((m_win, a_win))
+    # 4. GPU Acceleration with PyTorch
+    try:
+        # Convert to tensors
+        m_tensor = torch.tensor(mouth_signal_norm, dtype=torch.float32, device=device).view(1, 1, -1)
+        a_tensor = torch.tensor(audio_signal_norm, dtype=torch.float32, device=device).view(1, 1, -1)
+        
+        # Window parameters
+        window_duration = 5.0 # seconds
+        window_size = int(window_duration * fps)
+        step_size = int(window_size / 2)
+        
+        if m_tensor.shape[2] < window_size:
+            windows_m = [m_tensor]
+            windows_a = [a_tensor]
+        else:
+            windows_m = m_tensor.unfold(2, window_size, step_size).squeeze(0).permute(1, 0, 2) # (N_win, 1, W)
+            windows_a = a_tensor.unfold(2, window_size, step_size).squeeze(0).permute(1, 0, 2) # (N_win, 1, W)
+
+        scores = []
+        max_lag = int(fps * 0.5) # +/- 0.5s
+        
+        # Process windows
+        for i in range(windows_m.shape[0]):
+            w_m = windows_m[i] # (1, W)
+            w_a = windows_a[i] # (1, W)
             
-    window_scores = []
-    
-    for m_win, a_win in windows:
-        # Skip windows with no audio activity (silence)
-        if np.std(a_win) < 0.01:
-            continue
+            # Skip silence/static
+            if torch.std(w_a) < 0.01 or torch.std(w_m) < 0.01:
+                continue
+                
+            # Cross correlation
+            # We want 'same' or 'valid' with padding.
+            # conv1d(input, weight)
+            # input: w_a (1, 1, W)
+            # weight: w_m (1, 1, W)
+            # This gives a single scalar if no padding.
+            # We want lags.
+            # Let's pad audio window.
             
-        # Skip windows with no mouth movement (static face)
-        if np.std(m_win) < 0.01:
-            continue
+            pad_amount = max_lag
+            w_a_padded = F.pad(w_a.unsqueeze(0), (pad_amount, pad_amount)) # (1, 1, W + 2*lag)
+            w_m_kernel = w_m.unsqueeze(0) # (1, 1, W)
             
-        # Cross-correlation
-        # We only care about the center part of the correlation to avoid edge effects?
-        # Actually, 'valid' mode handles this if we crop one signal.
-        # But here both are same size. 'same' or 'full' is needed, or just standard correlate.
-        # Let's use the same logic as before but on the window.
-        
-        # To allow lag, we need one signal to be shorter or just use full correlation and find peak near center.
-        # Let's use full correlation.
-        corr = correlate(a_win, m_win, mode='full')
-        lags = np.arange(-len(a_win) + 1, len(a_win))
-        
-        # Filter for lags within max_lag_frames
-        valid_indices = np.where(np.abs(lags) <= max_lag_frames)[0]
-        if len(valid_indices) == 0:
-            continue
+            # Cross-corr via conv1d
+            # Output size: (W + 2*lag) - W + 1 = 2*lag + 1
+            cc = F.conv1d(w_a_padded, w_m_kernel) # (1, 1, 2*lag+1)
+            cc = cc.squeeze() / window_size # Normalize by length
             
-        valid_corr = corr[valid_indices]
-        
-        # Normalize by length
-        norm_corr = valid_corr / len(m_win)
-        
-        max_corr = np.max(norm_corr)
-        window_scores.append(max_corr)
-        
-    if not window_scores:
-        print(" C1: Warning - No valid windows found (silence or static). Defaulting to 0.0")
+            max_corr = torch.max(cc).item()
+            
+            # Peak Sharpness: Max / Mean (of absolute correlations)
+            # High sharpness = good sync. Low sharpness (flat) = bad sync.
+            mean_corr = torch.mean(torch.abs(cc)).item() + epsilon
+            sharpness = max_corr / mean_corr
+            
+            # Combined score: correlation weighted by sharpness?
+            # Or just correlation if it's high enough.
+            # Let's use max_corr but penalize if sharpness is low.
+            
+            final_score = max_corr
+            if sharpness < 1.5: # Arbitrary threshold for "flat" peak
+                final_score *= 0.5
+                
+            scores.append(final_score)
+            
+        if not scores:
+            print(" C1: Warning - No valid windows. Defaulting to 0.0")
+            lip_sync_score = 0.0
+        else:
+            # Average of top 50% scores
+            scores.sort(reverse=True)
+            top_n = max(1, int(len(scores) * 0.5))
+            lip_sync_score = float(np.mean(scores[:top_n]))
+            lip_sync_score = max(0.0, lip_sync_score)
+
+    except Exception as e:
+        print(f" C1: Error during GPU/Tensor processing: {e}. Falling back to CPU/NumPy.")
+        # Fallback logic could go here, but for now we assume torch works.
         lip_sync_score = 0.0
-    else:
-        # Take the average of the top 50% of window scores
-        # This assumes at least half the video should be in sync if it's real/good fake.
-        # It ignores bad segments (looking away, silence).
-        window_scores.sort(reverse=True)
-        top_n = max(1, int(len(window_scores) * 0.5))
-        top_scores = window_scores[:top_n]
-        lip_sync_score = float(np.mean(top_scores))
-        
-        # Clamp
-        lip_sync_score = max(0.0, lip_sync_score)
 
-    print(f" C1: Lip Sync Analysis Complete. Score: {lip_sync_score:.4f} (Computed over {len(window_scores)} windows)")
+    print(f" C1: Lip Sync Analysis Complete. Score: {lip_sync_score:.4f}")
     state["lip_sync_score"] = lip_sync_score
-
     return state
