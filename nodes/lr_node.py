@@ -117,13 +117,23 @@ def run(state: dict) -> dict:
     if evidence:
         evidence_avg = sum(_safe_float(e.get("reliability_score"), 0.0) for e in evidence) / max(len(evidence), 1)
 
+    # Feature Normalization (Approximate to 0-1 range)
+    # Blink rate: Normal ~15-30 bpm. Max expected ~60. 
+    blink_rate_norm = min(blink_rate / 60.0, 1.0)
+    
+    # Headpose jerk: Normal < 10. Max expected ~100.
+    headpose_jerk_norm = min(headpose_jerk / 100.0, 1.0)
+    
+    # Speech rate: Normal ~2.5 wps. Max expected ~5.
+    speech_rate_norm = min(speech_rate / 5.0, 1.0)
+
     features: Dict[str, float] = {
-        "speech_rate": speech_rate,
+        "speech_rate": speech_rate_norm,
         "pause_ratio": pause_ratio,
         "lip_sync": lip_sync_score,
         "gesture_score": gesture_score,
-        "blink_rate": blink_rate,
-        "headpose_jerk": headpose_jerk,
+        "blink_rate": blink_rate_norm,
+        "headpose_jerk": headpose_jerk_norm,
         "texture": texture_score,
         "claim_reliability": avg_claim_reliability,
         "evidence_reliability": evidence_avg,
@@ -131,7 +141,8 @@ def run(state: dict) -> dict:
 
     weights = _load_weights("lr_weights.json")
 
-    print(f"LR Node: Bias = {weights.get('bias', 0.0)}")
+    z = weights.get("bias", 0.0)
+    print(f"LR Node: Bias = {z}")
     for k, v in features.items():
         w = weights.get(k, 0.0)
         contribution = w * v
@@ -156,7 +167,7 @@ def run(state: dict) -> dict:
 
     label = state.get("label")
     if label in (0, 1):
-        lr = 0.01
+        lr = 0.005
         error = fake_prob - float(label)
         weights["bias"] = weights.get("bias", 0.0) - lr * error * 1.0
         for k, v in features.items():

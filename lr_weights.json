@@ -1,12 +1,12 @@
 {
-  "bias": -0.5043105921206016,
-  "speech_rate": 0.07018415545096995,
-  "pause_ratio": 0.10072662959623492,
-  "lip_sync": -0.5004752675542727,
-  "gesture_score": -0.5,
-  "blink_rate": 0.11036781151056141,
-  "headpose_jerk": -0.45836717072910205,
-  "texture": 0.5,
-  "claim_reliability": -1.0,
-  "evidence_reliability": -0.8
+  "bias": 0.030583538411080854,
+  "speech_rate": 0.11758362180038856,
+  "pause_ratio": 0.10228362218503764,
+  "lip_sync": -0.49633891106472017,
+  "gesture_score": -0.48555655353476374,
+  "blink_rate": -0.06941646158891913,
+  "headpose_jerk": 0.10556978396447772,
+  "texture": 0.5206559657596013,
+  "claim_reliability": -0.4928788370161665,
+  "evidence_reliability": -0.4928788370161665
 }
