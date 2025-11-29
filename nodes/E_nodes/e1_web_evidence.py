@@ -7,16 +7,7 @@ import uuid
 from typing import List, Dict, Any, Optional, TypedDict, Union
 from datetime import datetime
 import re
-
-import json
-import os
-import time
-import hashlib
-import logging
-import uuid
-from typing import List, Dict, Any, Optional, TypedDict, Union
-from datetime import datetime
-import re
+from nodes import dump_node_debug
 
 # Standard Imports
 from duckduckgo_search import DDGS
@@ -73,6 +64,14 @@ def run(state: dict) -> dict:
     """
     print("Node E1: Retrieving Web Evidence...")
     
+    data_dir = state.get("data_dir")
+    if data_dir:
+        try:
+            with open(os.path.join(data_dir, "debug_log.txt"), "a") as f:
+                f.write("Node E1 started.\n")
+        except Exception:
+            pass
+    
     # 1. Input Validation
     claims_raw = state.get("claims", [])
     debug = state.get("debug", False)
@@ -111,6 +110,9 @@ def run(state: dict) -> dict:
                 "claim_text": str(c),
                 "who": None, "what": None, "when": None, "where": None
             })
+    
+    # Write back enriched claims (with IDs) so downstream nodes/E3 can align on ID/text
+    state["claims"] = claims
 
     evidence_results: List[EvidenceOutput] = []
     searcher = WebSearcher(debug=debug, use_cache=use_cache)
@@ -153,6 +155,11 @@ def run(state: dict) -> dict:
             
         state["evidence"] = evidence_results
         print(f"Node E1: Evidence retrieval complete. Found {len(evidence_results)} total evidence items.")
+        dump_node_debug(
+            state,
+            "E1",
+            {"claims": len(claims), "evidence_items": len(evidence_results)},
+        )
         
     except Exception as e:
         print(f"Error in E1 node: {e}")

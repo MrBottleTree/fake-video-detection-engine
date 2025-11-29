@@ -3,10 +3,13 @@ import os
 import urllib.parse
 import urllib.request
 import logging
+import time
 from typing import List, Dict, Any, Optional
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openai import OpenAI
 from dotenv import load_dotenv
+from nodes import dump_node_debug
 
 # Load environment variables
 load_dotenv()
@@ -18,6 +21,7 @@ logger = logging.getLogger(__name__)
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = "gpt-4o"
+MAX_PARALLEL = max(1, int(os.getenv("E2_MAX_WORKERS", "4")))
 
 # Initialize OpenAI client if API key is available
 openai_client = None
@@ -164,7 +168,8 @@ Return ONLY a JSON object with this exact structure:
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            timeout=20.0,
         )
         
         content = response.choices[0].message.content
@@ -261,6 +266,19 @@ def calculate_reliability_score(evidence_item: Dict[str, Any], trusted_sources: 
         "details": details
     }
 
+def _score_single_item(item: Dict[str, Any], trusted_sources: Dict[str, List[str]], claim_consensus_map: Dict[str, int]) -> Dict[str, Any]:
+    """
+    Score a single evidence item and attach reliability fields.
+    Separated for use with ThreadPoolExecutor.
+    """
+    start = time.time()
+    new_item = item.copy()
+    result = calculate_reliability_score(new_item, trusted_sources, claim_consensus_map)
+    new_item["reliability_score"] = result["score"]
+    new_item["reliability_details"] = result["details"]
+    new_item["_e2_elapsed"] = time.time() - start
+    return new_item
+
 def run(state: dict) -> dict:
     """
     E2 Node: Source Reliability Scorer
@@ -284,6 +302,8 @@ def run(state: dict) -> dict:
         print("No evidence found to score.")
         return state
 
+
+
     trusted_sources = load_trusted_sources()
     
     # Calculate consensus counts
@@ -302,17 +322,33 @@ def run(state: dict) -> dict:
     claim_consensus_map = {k: len(v) for k, v in claim_domains.items()}
     
     scored_evidence = []
-    for item in evidence_list:
-        # Create a copy to avoid mutating original in place immediately (good practice)
-        new_item = item.copy()
-        
-        result = calculate_reliability_score(new_item, trusted_sources, claim_consensus_map)
-        
-        new_item["reliability_score"] = result["score"]
-        new_item["reliability_details"] = result["details"]
-        
-        scored_evidence.append(new_item)
-        print(f"Scored {new_item.get('url', 'N/A')}: {result['score']:.2f}")
+    print(f"E2: Scoring {len(evidence_list)} evidence items with up to {MAX_PARALLEL} workers...")
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as executor:
+        future_map = {
+            executor.submit(_score_single_item, item, trusted_sources, claim_consensus_map): item
+            for item in evidence_list
+        }
+
+        for future in as_completed(future_map):
+            original_item = future_map[future]
+            try:
+                new_item = future.result()
+                scored_evidence.append(new_item)
+                elapsed = new_item.pop("_e2_elapsed", None)
+                timing_msg = f" in {elapsed:.2f}s" if elapsed is not None else ""
+                print(f"Scored {new_item.get('url', 'N/A')}: {new_item.get('reliability_score', 0.0):.2f}{timing_msg}")
+            except Exception as e:
+                errored_item = original_item.copy()
+                errored_item["reliability_score"] = 0.0
+                errored_item["reliability_details"] = [f"Scoring failed: {e}"]
+                scored_evidence.append(errored_item)
+                print(f"E2: Failed to score {original_item.get('url', 'N/A')}: {e}")
 
     state["evidence"] = scored_evidence
+
+    dump_node_debug(
+        state,
+        "E2",
+        {"evidence_scored": len(scored_evidence)},
+    )
     return state
