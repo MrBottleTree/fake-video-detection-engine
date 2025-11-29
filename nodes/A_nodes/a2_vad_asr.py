@@ -3,6 +3,7 @@ import whisper
 import torch
 import imageio_ffmpeg
 import warnings
+from nodes import dump_node_debug
 
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
 
@@ -40,6 +41,15 @@ def run(state: dict) -> dict:
         if "metadata" not in state:
             state["metadata"] = {}
         state["metadata"]["transcription_model"] = "openai-whisper-base"
+        dump_node_debug(
+            state,
+            "A2",
+            {
+                "words": state.get("word_count", 0),
+                "segments": len(state.get("segments", [])),
+                "device": device,
+            },
+        )
 
     except Exception as e:
         print(f"Error in A2 node: {e}")
@@ -51,4 +61,5 @@ def run(state: dict) -> dict:
         print(f"[DEBUG] A2: Word Count: {state.get('word_count')}")
         print(f"[DEBUG] A2: Segments: {len(state.get('segments', []))}")
 
+    print("Node A2 returning state...", flush=True)
     return state

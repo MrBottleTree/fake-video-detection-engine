@@ -1,5 +1,6 @@
 import os
 from moviepy import AudioFileClip
+from nodes import dump_node_debug
 
 def run(state: dict) -> dict:
     print("Node A1: Standardizing audio...")
@@ -37,6 +38,8 @@ def run(state: dict) -> dict:
             state["metadata"] = {}
         state["metadata"]["audio_sample_rate"] = 16000
         state["metadata"]["audio_channels"] = 1
+
+        dump_node_debug(state, "A1", {"audio_path": output_path})
 
     except Exception as e:
         print(f"Error standardizing audio: {e}")
