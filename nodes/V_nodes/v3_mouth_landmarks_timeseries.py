@@ -4,6 +4,7 @@ import numpy as np
 import face_alignment
 import torch
 import math
+from nodes import dump_node_debug
 
 class OneEuroFilter:
     def __init__(self, t0, x0, dx0=0.0, min_cutoff=1.0, beta=0.0, d_cutoff=1.0):
@@ -60,8 +61,14 @@ def calculate_iou(boxA, boxB):
     return iou
 
 def run(state: dict) -> dict:
+    print("DEBUG: Entering Node V3 run function...")
     print("Node V3: Extracting mouth landmarks (Time-series) with Robust Tracking...")
     output_dir = state.get("data_dir")
+    
+    if output_dir and os.path.exists(output_dir):
+        with open(os.path.join(output_dir, "debug_log.txt"), "a") as f:
+            f.write("Node V3 started.\n")
+            
     debug = state.get("debug", False)
     
     if not output_dir or not os.path.exists(output_dir):
@@ -93,30 +100,37 @@ def run(state: dict) -> dict:
         fps = cap.get(cv2.CAP_PROP_FPS)
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        target_fps = 5.0  # sample for speed; full frame-by-frame is too slow
+        sample_stride = max(1, int(round(fps / target_fps))) if fps else 1
+        viz_fps = max(1.0, fps / sample_stride) if fps else 1.0
         
         viz_path = os.path.join(output_dir, "landmarks_viz.mp4")
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        viz_writer = cv2.VideoWriter(viz_path, fourcc, fps, (frame_width, frame_height))
+        viz_writer = cv2.VideoWriter(viz_path, fourcc, viz_fps, (frame_width, frame_height))
         
         mouth_landmarks_data = []
-        frame_count = 0
+        frame_idx = 0
+        processed_frames = 0
         
         active_face_box = None
         landmark_filter = None
         
-        while True:
+        while frame_idx < total_frames:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if not ret:
                 break
             
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            current_time = frame_count / fps
+            current_time = frame_idx / fps if fps else processed_frames
             
             try:
                 landmarks_list = fa.get_landmarks(frame_rgb)
             except Exception as e:
                 if debug:
-                    print(f"[DEBUG] Frame {frame_count}: Error in landmark detection: {e}")
+                    print(f"[DEBUG] Frame {frame_idx}: Error in landmark detection: {e}")
                 landmarks_list = None
 
             best_face_idx = -1
@@ -162,9 +176,9 @@ def run(state: dict) -> dict:
                             max_iou = iou
                             best_face_idx = i
                     
-                    if max_iou < 0.3:
+                    if max_iou < 0.15:
                         if debug:
-                            print(f"[DEBUG] Frame {frame_count}: Tracking lost (IoU {max_iou:.2f}), resetting.")
+                            print(f"[DEBUG] Frame {frame_idx}: Tracking lost (IoU {max_iou:.2f}), resetting.")
                         active_face_box = None
                         # Fallback to largest face
                         max_area = -1
@@ -222,15 +236,16 @@ def run(state: dict) -> dict:
             viz_writer.write(frame)
             
             mouth_landmarks_data.append({
-                "frame_id": frame_count,
-                "timestamp": frame_count / fps,
+                "frame_id": frame_idx,
+                "timestamp": current_time,
                 "landmarks": frame_landmarks
             })
             
-            frame_count += 1
+            processed_frames += 1
+            frame_idx += sample_stride
             
-            if debug and frame_count % 30 == 0:
-                print(f"[DEBUG] V3: Processed {frame_count} frames...")
+            if debug and processed_frames % 10 == 0:
+                print(f"[DEBUG] V3: Processed {processed_frames} frames (stride={sample_stride})...")
 
         cap.release()
         viz_writer.release()
@@ -244,6 +259,15 @@ def run(state: dict) -> dict:
         if "metadata" not in state:
             state["metadata"] = {}
         state["metadata"]["landmark_model"] = "face_alignment_sfd_smoothed"
+        dump_node_debug(
+            state,
+            "V3",
+            {
+                "frames": len(mouth_landmarks_data),
+                "viz_path": viz_path,
+                "fps_sampled": viz_fps,
+            },
+        )
 
     except Exception as e:
         print(f"Error in V3 node: {e}")

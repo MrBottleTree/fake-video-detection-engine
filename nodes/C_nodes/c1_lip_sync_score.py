@@ -3,6 +3,8 @@ import torch
 import torch.nn.functional as F
 from scipy.spatial import distance as dist
 import os
+import sys
+from nodes import dump_node_debug
 
 def calculate_mar(mouth_points):
     if len(mouth_points) < 20:
@@ -26,9 +28,16 @@ def calculate_mar(mouth_points):
 
 def run(state: dict) -> dict:
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Node C1: Analyzing Lip Sync (Robust Correlation) on {device.upper()}...")
+    print(f"Node C1: Analyzing Lip Sync (Robust Correlation) on {device.upper()}...", flush=True)
 
     mouth_landmarks = state.get("mouth_landmarks")
+    # If no faces were detected upstream, bail out to avoid spurious scores.
+    face_detections = state.get("face_detections") or []
+    if len(face_detections) == 0:
+        print(" C1: Warning - No faces detected in V1. Setting lip-sync score to 0.0.")
+        state["lip_sync_score"] = 0.0
+        return state
+
     metadata = state.get("metadata", {})
     fps = metadata.get("fps")
     duration = metadata.get("duration")
@@ -182,4 +191,13 @@ def run(state: dict) -> dict:
 
     print(f" C1: Lip Sync Analysis Complete. Score: {lip_sync_score:.4f}")
     state["lip_sync_score"] = lip_sync_score
+    dump_node_debug(
+        state,
+        "C1",
+        {
+            "lip_sync_score": lip_sync_score,
+            "mouth_samples": len(mouth_landmarks),
+            "audio_len": len(audio_signal) if audio_signal is not None else 0,
+        },
+    )
     return state

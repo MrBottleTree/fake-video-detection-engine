@@ -38,7 +38,8 @@ class TestV3MouthLandmarks(unittest.TestCase):
         mock_cap.get.side_effect = lambda prop: {
             5: 30.0,
             3: 640.0,
-            4: 480.0
+            4: 480.0,
+            7: 100.0
         }.get(prop, 0.0)
         
         dummy_frame = np.zeros((480, 640, 3), dtype=np.uint8)

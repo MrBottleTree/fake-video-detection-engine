@@ -6,6 +6,7 @@ import base64
 from openai import OpenAI
 from dotenv import load_dotenv
 import json
+from nodes import dump_node_debug
 
 load_dotenv()
 
@@ -22,7 +23,22 @@ def run(state: dict) -> dict:
         state["texture_ela_details"] = {"reason": "No faces found"}
         return state
 
-    sorted_faces = sorted(face_detections, key=lambda x: (x['faces'][0]['confidence'] * x['faces'][0]['bbox']['w'] * x['faces'][0]['bbox']['h']), reverse=True)
+    valid_faces = [f for f in face_detections if f.get("faces")]
+    if not valid_faces:
+        print("Node V5: Face detections present but no crops were generated.")
+        state["texture_ela_score"] = 0.0
+        state["texture_ela_details"] = {"reason": "No face crops available"}
+        return state
+
+    sorted_faces = sorted(
+        valid_faces,
+        key=lambda x: (
+            x["faces"][0]["confidence"]
+            * x["faces"][0]["bbox"]["w"]
+            * x["faces"][0]["bbox"]["h"]
+        ),
+        reverse=True,
+    )
     selected_faces = sorted_faces[:3]
     
     ela_dir = os.path.join(output_dir, "ela_analysis")
@@ -84,28 +100,43 @@ def run(state: dict) -> dict:
                 base64_fft = encode_image(fft_output_path)
                 
                 response = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are a forensic image analyst specializing in deepfake detection. Analyze the provided images: 1. Original Face, 2. Error Level Analysis (ELA) map, 3. FFT Magnitude Spectrum. Look for: blending artifacts in ELA (high contrast edges around eyes/mouth), inconsistent noise patterns, or grid-like artifacts in FFT (GAN fingerprints). Provide a 'fake_probability' score (0.0 to 1.0) and a brief reasoning."
-                        },
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": "Analyze this face for manipulation."},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_original}"}},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_ela}"}},
-                                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_fft}"}}
-                            ]
-                        }
-                    ],
-                    response_format={"type": "json_object"}
-                )
-                
-                result_json = json.loads(response.choices[0].message.content)
-                analysis_results.append(result_json)
-                
+                        model="gpt-4o",
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are a forensic image analyst specializing in deepfake detection. "
+                                    "You MUST return a JSON object (nothing else) with keys 'fake_probability' "
+                                    "and 'reasoning'."
+                                ),
+                            },
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "Analyze this face for manipulation. Return JSON."},
+                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_original}"}},
+                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_ela}"}},
+                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_fft}"}},
+                                ],
+                            },
+                        ],
+                        response_format={"type": "json_object"},
+                        timeout=30.0
+                    )
+
+                content = response.choices[0].message.content
+                if not content:
+                    if debug:
+                        print(f"[DEBUG] V5: Empty response content for face {i}, skipping.")
+                    continue
+                try:
+                    result_json = json.loads(content)
+                    analysis_results.append(result_json)
+                except Exception as parse_err:
+                    print(f"Error parsing OpenAI response for face {i}: {parse_err}")
+                    if debug:
+                        print(f"[DEBUG] V5: Raw content: {content}")
+
         except Exception as e:
             print(f"Error analyzing face {i}: {e}")
             if debug:
@@ -113,11 +144,33 @@ def run(state: dict) -> dict:
                 traceback.print_exc()
 
     # Aggregate scores
-    if analysis_results:
-        avg_score = sum(r.get('fake_probability', 0) for r in analysis_results) / len(analysis_results)
+    def _safe_float(val, default=0.0):
+        try:
+            return float(val)
+        except Exception:
+            return default
+
+    scores = []
+    for r in analysis_results:
+        if isinstance(r, dict):
+            scores.append(_safe_float(r.get("fake_probability"), None))
+        else:
+            scores.append(_safe_float(r, None))
+    scores = [s for s in scores if s is not None]
+
+    if scores:
+        avg_score = sum(scores) / len(scores)
         state["texture_ela_score"] = avg_score
         state["texture_ela_details"] = analysis_results
         print(f"Node V5: Analysis complete. Score: {avg_score:.2f}")
+        dump_node_debug(
+            state,
+            "V5",
+            {
+                "faces_analyzed": len(analysis_results),
+                "avg_score": avg_score,
+            },
+        )
     else:
         print("Node V5: No analysis results generated.")
         state["texture_ela_score"] = 0.0

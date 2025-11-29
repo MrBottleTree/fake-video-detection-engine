@@ -1,6 +1,7 @@
 import cv2
 import os
 import numpy as np
+from nodes import dump_node_debug
 
 def run(state: dict) -> dict:
     print("Node V1: Extracting keyframes and tracking faces...")
@@ -52,28 +53,36 @@ def run(state: dict) -> dict:
         )
 
         net = cv2.dnn.readNetFromCaffe(prototxt_path, model_path)
-        
-        # Attempt to use CUDA
-        try:
-            net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
-            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
-            
-            # Run a dummy forward pass to check if CUDA works
-            dummy_blob = np.zeros((1, 3, 300, 300), dtype=np.float32)
-            net.setInput(dummy_blob)
-            net.forward()
-            
+
+        def try_enable_cuda(loaded_net) -> bool:
+            try:
+                # Quickly bail if OpenCV wasn't built with CUDA or no device is present.
+                if not hasattr(cv2, "cuda") or cv2.cuda.getCudaEnabledDeviceCount() <= 0:
+                    if debug:
+                        print("[DEBUG] V1: OpenCV CUDA not available or no GPU detected.")
+                    return False
+
+                loaded_net.setPreferableBackend(cv2.dnn.DNN_BACKEND_CUDA)
+                loaded_net.setPreferableTarget(cv2.dnn.DNN_TARGET_CUDA)
+
+                # Dummy pass to confirm the build really supports CUDA backend.
+                dummy_blob = np.zeros((1, 3, 300, 300), dtype=np.float32)
+                loaded_net.setInput(dummy_blob)
+                loaded_net.forward()
+                return True
+            except Exception as e:
+                if debug:
+                    print(f"[DEBUG] V1: CUDA init failed ({e}), will use CPU.")
+                return False
+
+        if try_enable_cuda(net):
             print("Node V1: Face Detection running on CUDA")
             if debug:
                 print("[DEBUG] V1: CUDA backend successfully initialized.")
-        except Exception as e:
-            print(f"Node V1: Face Detection running on CPU (CUDA failed or unavailable: {e})")
-            if debug:
-                print(f"[DEBUG] V1: CUDA backend failed ({e}), falling back to CPU.")
+        else:
             net.setPreferableBackend(cv2.dnn.DNN_BACKEND_DEFAULT)
             net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-
-            net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+            print("Node V1: Face Detection running on CPU (CUDA unavailable in OpenCV build).")
 
         keyframes_paths = []
         face_detections = []
@@ -185,6 +194,15 @@ def run(state: dict) -> dict:
         state["metadata"]["video_fps"] = fps
         state["metadata"]["total_frames"] = total_frames
         state["metadata"]["face_detection_model"] = "opencv_dnn_ssd"
+        dump_node_debug(
+            state,
+            "V1",
+            {
+                "keyframes": len(keyframes_paths),
+                "faces": sum(len(d["faces"]) for d in face_detections),
+                "fps": fps,
+            },
+        )
         
         if debug:
             print(f"[DEBUG] V1: Saved keyframes to {keyframes_dir}")

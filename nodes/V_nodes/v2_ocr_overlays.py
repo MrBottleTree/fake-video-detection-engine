@@ -1,5 +1,6 @@
 import easyocr
 import os
+from nodes import dump_node_debug
 
 def run(state: dict) -> dict:
     print("Node V2: Extracting text from keyframes (OCR)...")
@@ -65,9 +66,15 @@ def run(state: dict) -> dict:
         if "metadata" not in state:
             state["metadata"] = {}
         state["metadata"]["ocr_model"] = "easyocr_en"
+        dump_node_debug(
+            state,
+            "V2",
+            {"frames_with_text": len(ocr_results), "detections": sum(len(fr["detections"]) for fr in ocr_results)},
+        )
 
     except Exception as e:
         print(f"Error in V2 node: {e}")
         raise e
 
+    print("Node V2 returning state...", flush=True)
     return state

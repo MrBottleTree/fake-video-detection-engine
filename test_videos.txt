@@ -1,0 +1,14 @@
+# Real Videos (Short < 5 mins)
+https://www.youtube.com/watch?v=O7SmYQiPXCs  # BBC News 1 Minute Update
+https://www.youtube.com/watch?v=Gg_ncsRWboo  # Apple iPhone 15 Official Trailer
+https://www.youtube.com/watch?v=LmxlcJFTaYU  # TED-Ed Short
+
+# Fake Videos (Deepfakes / AI Avatars - Short)
+https://www.youtube.com/watch?v=iyiOVUbsPcM  # Deep Tom Cruise (Magic Trick)
+https://www.youtube.com/watch?v=bE1KWpoX9Hk  # Obama Deepfake (Jordan Peele PSA)
+https://www.youtube.com/watch?v=7k3N1bUURa4  # Synthesia AI Avatar Demo
+
+# Misinformation Deepfakes (Incorrect Claims)
+https://www.youtube.com/watch?v=enr78tJkTLE  # Zelenskyy Surrender Deepfake (False Claim)
+https://www.youtube.com/watch?v=Xe1_L-a-nSI  # Elon Musk Crypto Scam (False Claim)
+https://www.youtube.com/watch?v=9fNG7Nho_gk  # Biden Misinformation Deepfake

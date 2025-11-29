@@ -1,0 +1,41 @@
+Module A3 imported
+Module C3 imported
+2025-11-29 14:35:33,020 - INFO - E2: OpenAI client initialized successfully
+Node C1: Analyzing Lip Sync (Robust Correlation) on CUDA...
+F C1: Warning - No faces detected in V1. Setting lip-sync score to 0.0.
+Delayed Sync Score: 0.0
+Node C1: Analyzing Lip Sync (Robust Correlation) on CUDA...
+. C1: Warning - No faces detected in V1. Setting lip-sync score to 0.0.
+Node C1: Analyzing Lip Sync (Robust Correlation) on CUDA...
+. C1: Warning - No faces detected in V1. Setting lip-sync score to 0.0.
+Random Sync Score: 0.0
+Node C1: Analyzing Lip Sync (Robust Correlation) on CUDA...
+F C1: Warning - No faces detected in V1. Setting lip-sync score to 0.0.
+Perfect Sync Score: 0.0
+Node C1: Analyzing Lip Sync (Robust Correlation) on CUDA...
+. C1: Warning - No faces detected in V1. Setting lip-sync score to 0.0.
+Node C1: Analyzing Lip Sync (Robust Correlation) on CUDA...
+.
+======================================================================
+FAIL: test_delayed_sync (tests.test_c1_lip_sync_score.TestC1LipSyncScore.test_delayed_sync)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/project/tests/test_c1_lip_sync_score.py", line 81, in test_delayed_sync
+    self.assertGreater(result["lip_sync_score"], 0.7)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0.0 not greater than 0.7
+
+======================================================================
+FAIL: test_perfect_sync (tests.test_c1_lip_sync_score.TestC1LipSyncScore.test_perfect_sync)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/ubuntu/project/tests/test_c1_lip_sync_score.py", line 69, in test_perfect_sync
+    self.assertGreater(result["lip_sync_score"], 0.8)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0.0 not greater than 0.8
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.119s
+
+FAILED (failures=2)
+ C1: Warning - No faces detected in V1. Setting lip-sync score to 0.0.

@@ -1,9 +1,13 @@
 import os
 import librosa
 import numpy as np
+from nodes import dump_node_debug
+import sys
+
+print("Module A3 imported", flush=True)
 
 def run(state: dict) -> dict:
-    print("Node A3: Detecting audio onsets and envelope...")
+    print("Node A3: Detecting audio onsets and envelope...", flush=True)
     audio_path = os.path.join(state.get("data_dir"), "audio_16k.wav")
     debug = state.get("debug", False)
     
@@ -53,6 +57,15 @@ def run(state: dict) -> dict:
         if "metadata" not in state:
             state["metadata"] = {}
         state["metadata"]["onset_detection_method"] = "librosa.onset.onset_detect"
+        dump_node_debug(
+            state,
+            "A3",
+            {
+                "onset_count": len(onset_times_list),
+                "envelope_len": len(state.get("audio_envelope", [])),
+                "fps": fps,
+            },
+        )
 
     except Exception as e:
         print(f"Error in A3 node: {e}")
