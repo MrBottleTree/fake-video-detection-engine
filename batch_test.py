@@ -6,8 +6,27 @@ import json
 VIDEO_DIR = "videos"
 RESULTS_FILE = "batch_results.txt"
 
+import cv2
+
+def get_video_duration(filename):
+    path = os.path.join(VIDEO_DIR, filename)
+    try:
+        cap = cv2.VideoCapture(path)
+        if not cap.isOpened():
+            return float('inf')
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        duration = frame_count / fps if fps > 0 else float('inf')
+        cap.release()
+        return duration
+    except Exception:
+        return float('inf')
+
 def get_videos():
-    return [f for f in os.listdir(VIDEO_DIR) if f.endswith(".mp4")]
+    videos = [f for f in os.listdir(VIDEO_DIR) if f.endswith(".mp4")]
+    # Sort by duration
+    videos.sort(key=get_video_duration)
+    return videos
 
 def get_label(filename):
     filename_lower = filename.lower()
