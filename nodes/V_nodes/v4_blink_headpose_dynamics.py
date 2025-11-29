@@ -6,6 +6,7 @@ import torch
 from scipy.spatial import distance as dist
 import math
 from sixdrepnet import SixDRepNet
+from nodes import dump_node_debug
 
 class OneEuroFilter:
     def __init__(self, t0, x0, dx0=0.0, min_cutoff=1.0, beta=0.0, d_cutoff=1.0):
@@ -140,10 +141,16 @@ def run(state: dict) -> dict:
         fps = cap.get(cv2.CAP_PROP_FPS)
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        
+        target_fps = 5.0  # sample frames for speed
+        sample_stride = max(1, int(round(fps / target_fps))) if fps else 1
+        viz_fps = max(1.0, fps / sample_stride) if fps else 1.0
         
         blink_data = []
         head_pose_data = []
-        frame_count = 0
+        frame_idx = 0
+        processed_frames = 0
         
         active_face_box = None
         landmark_filter = None
@@ -151,21 +158,22 @@ def run(state: dict) -> dict:
         
         viz_path = os.path.join(output_dir, "headpose_viz.mp4")
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        viz_writer = cv2.VideoWriter(viz_path, fourcc, fps, (frame_width, frame_height))
+        viz_writer = cv2.VideoWriter(viz_path, fourcc, viz_fps, (frame_width, frame_height))
 
-        while True:
+        while frame_idx < total_frames:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ret, frame = cap.read()
             if not ret:
                 break
-            
+
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            current_time = frame_count / fps
+            current_time = frame_idx / fps if fps else processed_frames
             
             try:
                 landmarks_list = fa.get_landmarks_from_image(frame_rgb)
             except Exception as e:
                 if debug:
-                    print(f"[DEBUG] Frame {frame_count}: Error in landmark detection: {e}")
+                    print(f"[DEBUG] Frame {frame_idx}: Error in landmark detection: {e}")
                 landmarks_list = None
             
             current_ear = None
@@ -208,9 +216,9 @@ def run(state: dict) -> dict:
                             max_iou = iou
                             best_face_idx = i
                     
-                    if max_iou < 0.3:
+                    if max_iou < 0.15:
                         if debug:
-                            print(f"[DEBUG] Frame {frame_count}: Tracking lost (IoU {max_iou:.2f}), resetting.")
+                            print(f"[DEBUG] Frame {frame_idx}: Tracking lost (IoU {max_iou:.2f}), resetting.")
                         active_face_box = None
                         # Fallback to largest face
                         max_area = -1
@@ -300,21 +308,22 @@ def run(state: dict) -> dict:
             
             if current_ear is not None:
                 blink_data.append({
-                    "frame_id": frame_count,
+                    "frame_id": frame_idx,
                     "timestamp": current_time,
                     "ear": current_ear
                 })
             
             if current_pose is not None:
                 head_pose_data.append({
-                    "frame_id": frame_count,
+                    "frame_id": frame_idx,
                     "timestamp": current_time,
                     "pose": current_pose
                 })
             
-            frame_count += 1
-            if debug and frame_count % 50 == 0:
-                 print(f"[DEBUG] V4: Processed {frame_count} frames...")
+            processed_frames += 1
+            frame_idx += sample_stride
+            if debug and processed_frames % 10 == 0:
+                print(f"[DEBUG] V4: Processed {processed_frames} frames (stride={sample_stride})...")
 
         cap.release()
         viz_writer.release()
@@ -329,6 +338,16 @@ def run(state: dict) -> dict:
             state["metadata"] = {}
         state["metadata"]["blink_model"] = "EAR_threshold_3D_smoothed"
         state["metadata"]["pose_model"] = "SixDRepNet_smoothed"
+        dump_node_debug(
+            state,
+            "V4",
+            {
+                "blink_samples": len(blink_data),
+                "pose_samples": len(head_pose_data),
+                "viz_path": viz_path,
+                "fps_sampled": viz_fps,
+            },
+        )
 
     except Exception as e:
         print(f"Error in V4 node: {e}")
