@@ -32,7 +32,8 @@ class TestV4BlinkHeadPose(unittest.TestCase):
         mock_cap.get.side_effect = lambda prop: {
             5: 30.0,  # FPS
             3: 640.0, # Width
-            4: 480.0  # Height
+            4: 480.0, # Height
+            7: 100.0  # Frame Count
         }.get(prop, 0.0)
 
         # Mock frames

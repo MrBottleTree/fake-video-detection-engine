@@ -4,23 +4,17 @@ import sys
 import os
 import numpy as np
 
-# Add nodes directory to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'nodes', 'C_nodes')))
 
 from c2_gesture_narration_check import run
 
 class TestC2GestureCheck(unittest.TestCase):
-
     @patch('c2_gesture_narration_check.SentenceTransformer')
     def test_clip_consistency_high(self, mock_transformer_cls):
-        """Test that high CLIP score results in 'Consistent' without OpenAI call."""
-        # Mock CLIP model
         mock_model = MagicMock()
-        # Mock encode to return embeddings that give high cosine similarity
-        # vector a . vector b = 1.0 if normalized and identical
         mock_model.encode.side_effect = [
-            np.array([[1.0, 0.0]]), # Image embedding
-            np.array([[1.0, 0.0]])  # Text embedding
+            np.array([[1.0, 0.0]]),
+            np.array([[1.0, 0.0]])
         ]
         mock_transformer_cls.return_value = mock_model
 
@@ -31,7 +25,6 @@ class TestC2GestureCheck(unittest.TestCase):
             "metadata": {"video_fps": 1.0}
         }
 
-        # Mock os.path.exists to avoid file check failure
         with patch('os.path.exists', return_value=True), \
              patch('PIL.Image.open', return_value=MagicMock()):
             
@@ -45,20 +38,14 @@ class TestC2GestureCheck(unittest.TestCase):
     @patch('c2_gesture_narration_check.OpenAI')
     @patch('os.getenv')
     def test_clip_ambiguous_openai_fallback(self, mock_getenv, mock_openai_cls, mock_transformer_cls):
-        """Test that ambiguous CLIP score triggers OpenAI fallback."""
-        # Mock API Key
         mock_getenv.return_value = "sk-dummy-key"
 
-        # Mock CLIP model for ambiguous score (~0.2)
         mock_model = MagicMock()
-        # vec1=[1,0], vec2=[0.2, 0.98] -> dot=0.2
         mock_model.encode.side_effect = [
             np.array([[1.0, 0.0]]), 
             np.array([[0.2, 0.979]]) 
         ]
         mock_transformer_cls.return_value = mock_model
-
-        # Mock OpenAI
         mock_client = MagicMock()
         mock_completion = MagicMock()
         mock_completion.choices[0].message.content = '{"consistent": true, "reason": "OpenAI says yes"}'
@@ -82,7 +69,6 @@ class TestC2GestureCheck(unittest.TestCase):
             self.assertEqual(result_state['gesture_check'][0]['source'], "openai_fallback")
 
     def test_no_keyframes(self):
-        """Test handling of missing keyframes."""
         state = {"keyframes": [], "transcript": "foo"}
         result_state = run(state)
         self.assertEqual(result_state, state)
