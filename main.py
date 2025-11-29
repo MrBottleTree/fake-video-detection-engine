@@ -7,6 +7,8 @@ import shutil
 import datetime
 import yt_dlp
 from moviepy import VideoFileClip
+import cv2
+import torch
 import imageio_ffmpeg
 from typing import Optional, Dict, Any, TypedDict, Annotated
 import operator
@@ -30,6 +32,7 @@ class State(TypedDict):
     word_count: Annotated[Optional[int], overwrite]
     audio_onsets: Annotated[Optional[list], overwrite]
     onset_count: Annotated[Optional[int], overwrite]
+    audio_envelope: Annotated[Optional[list], overwrite]
     
     keyframes: Annotated[Optional[list], overwrite]
     face_detections: Annotated[Optional[list], overwrite]
@@ -43,6 +46,9 @@ class State(TypedDict):
     headpose_viz_path: Annotated[Optional[str], overwrite]
     
     lip_sync_score: Annotated[Optional[float], overwrite]
+    gesture_check: Annotated[Optional[list], overwrite]
+    texture_ela_score: Annotated[Optional[float], overwrite]
+    texture_ela_details: Annotated[Optional[Any], overwrite]
     claims: Annotated[Optional[list], overwrite]
     evidence: Annotated[Optional[list], overwrite]
     features: Annotated[Optional[Dict[str, float]], overwrite]
@@ -56,6 +62,112 @@ def in_node(state: State) -> State:
     os.makedirs(output_dir, exist_ok=True)
     
     metadata = {}
+
+    def ensure_video_decodable(video_path: str) -> str:
+        """
+        OpenCV in V1 cannot read some codecs (e.g., AV1). Use ffprobe to detect the
+        codec first so we can transcode early without spamming logs, then do a
+        lightweight OpenCV sanity check. Prefer GPU NVENC when available.
+        """
+        ffmpeg_bin = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
+        ffprobe_bin = shutil.which("ffprobe")
+        needs_transcode = False
+        detected_codec = None
+
+        if ffprobe_bin:
+            probe = subprocess.run(
+                [
+                    ffprobe_bin,
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=codec_name",
+                    "-of",
+                    "default=nk=1:nw=1",
+                    video_path,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if probe.returncode == 0:
+                detected_codec = probe.stdout.strip().lower() or None
+                if debug:
+                    print(f"[DEBUG] Detected video codec: {detected_codec}")
+                if detected_codec == "av1":
+                    needs_transcode = True
+                    print("Video codec is AV1; re-encoding to H.264 for OpenCV compatibility...")
+            elif debug:
+                print(f"[DEBUG] ffprobe failed to inspect codec: {probe.stderr.strip()}")
+
+        if not needs_transcode:
+            try:
+                if hasattr(cv2, "utils") and hasattr(cv2.utils, "logging"):
+                    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+                cap = cv2.VideoCapture(video_path)
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                ret, _ = cap.read()
+                cap.release()
+
+                if fps > 0 and total_frames > 0 and ret:
+                    if debug:
+                        print(f"[DEBUG] Video readable by OpenCV (fps={fps}, frames={total_frames})")
+                    return video_path
+                needs_transcode = True
+                print("Video not readable by OpenCV (fps/frames missing). Re-encoding to H.264...")
+            except Exception as e:
+                needs_transcode = True
+                print(f"Warning: OpenCV probe failed ({e}). Re-encoding video for compatibility...")
+
+        if not needs_transcode:
+            return video_path
+
+        temp_path = os.path.join(output_dir, "video_h264.mp4")
+
+        def transcode(codec: str):
+            return subprocess.run(
+                [
+                    ffmpeg_bin,
+                    "-y",
+                    "-i",
+                    video_path,
+                    "-c:v",
+                    codec,
+                    "-preset",
+                    "fast",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "copy",
+                    temp_path,
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+        use_gpu = torch.cuda.is_available()
+        if use_gpu:
+            gpu_run = transcode("h264_nvenc")
+            if gpu_run.returncode == 0:
+                shutil.move(temp_path, video_path)
+                print("Re-encoded video to H.264 with NVENC for OpenCV compatibility.")
+                return video_path
+            print("GPU transcode failed; retrying with CPU libx264...")
+            if debug:
+                print(f"[DEBUG] NVENC stderr: {gpu_run.stderr.strip()}")
+
+        cpu_run = transcode("libx264")
+        if cpu_run.returncode == 0:
+            shutil.move(temp_path, video_path)
+            print("Re-encoded video to H.264 for OpenCV compatibility.")
+            return video_path
+
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        print(f"Warning: Failed to re-encode video: {cpu_run.stderr.strip()}")
+        return video_path
 
     if input_path.startswith("http://") or input_path.startswith("https://"):
         print(f"Downloading video from URL: {input_path}")
@@ -96,6 +208,7 @@ def in_node(state: State) -> State:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(input_path, download=True)
                     video_path = ydl.prepare_filename(info)
+                    video_path = ensure_video_decodable(video_path)
                     metadata = {
                         "title": info.get("title"),
                         "duration": info.get("duration"),
@@ -142,6 +255,7 @@ def in_node(state: State) -> State:
         
         video_path = os.path.join(output_dir, "video.mp4")
         shutil.copy2(input_path, video_path)
+        video_path = ensure_video_decodable(video_path)
         metadata = {"original_path": input_path}
 
 
@@ -217,8 +331,7 @@ graph.add_edge("V2", "C3")
 graph.add_edge("C3", "E1")
 graph.add_edge("E1", "E2")
 graph.add_edge("E2", "E3")
-graph.add_edge("C3", "E3")
-graph.add_edge("E1", "E3")
+graph.add_edge("A2", "LR")
 graph.add_edge("C1", "LR")
 graph.add_edge("C2", "LR")
 graph.add_edge("V4", "LR")
