@@ -1,3 +1,0 @@
-Video Name                                                   | Label | Prob       | Pred  | Status
-----------------------------------------------------------------------------------------------------
-Biden AI Deepfake Goes TOO FAR – Internet Freaks Out!.mp4    | 1     | 0.27973828476099887874     | REAL  | WRONG
