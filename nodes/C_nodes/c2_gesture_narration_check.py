@@ -6,12 +6,32 @@ from sentence_transformers import SentenceTransformer, util
 from openai import OpenAI
 import base64
 from io import BytesIO
+from nodes import dump_node_debug
 
 def encode_image_base64(image_path):
     with Image.open(image_path) as img:
         buffered = BytesIO()
         img.save(buffered, format="JPEG")
         return base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+def find_closest_segment(timestamp: float, segments: list, tolerance: float = 2.0) -> dict:
+    """Finds the segment closest to the timestamp within a tolerance window."""
+    best_seg = None
+    min_dist = float('inf')
+    
+    for seg in segments:
+        start, end = seg["start"], seg["end"]
+        # Check strict overlap first
+        if start <= timestamp <= end:
+            return seg
+        
+        # Calculate distance to segment boundaries
+        dist = min(abs(timestamp - start), abs(timestamp - end))
+        if dist < min_dist and dist <= tolerance:
+            min_dist = dist
+            best_seg = seg
+            
+    return best_seg
 
 def run(state: dict) -> dict:
     print("Node C2: Checking Gesture-Narration Consistency (CLIP + OpenAI)...")
@@ -58,25 +78,39 @@ def run(state: dict) -> dict:
             continue
             
         # Extract timestamp from filename
+        # Extract timestamp from filename
+        timestamp = None
+        frame_id = -1
         try:
             basename = os.path.basename(kf_path)
-            frame_id = int(basename.split('_')[1].split('.')[0])
-            timestamp = frame_id / fps
-        except:
+            # Robust parsing: handle various filename formats
+            # Expected: frame_{id}.jpg or keyframe_{id}.jpg
+            parts = basename.replace('.', '_').split('_')
+            for p in parts:
+                if p.isdigit():
+                    frame_id = int(p)
+                    break
+            
+            if frame_id != -1:
+                timestamp = frame_id / fps
+            else:
+                if debug:
+                    print(f"[DEBUG] Could not parse frame ID from {basename}")
+                continue
+        except Exception as e:
             if debug:
-                print(f"[DEBUG] Could not parse timestamp from {kf_path}")
+                print(f"[DEBUG] Error parsing timestamp from {kf_path}: {e}")
             continue
 
-        # Find corresponding segment
-        current_text = ""
-        for seg in segments:
-            if seg["start"] <= timestamp <= seg["end"]:
-                current_text = seg["text"]
-                break
+        # Find corresponding segment (Fuzzy Match)
+        matched_seg = find_closest_segment(timestamp, segments, tolerance=2.0)
         
-        if not current_text:
-            # If no exact segment, maybe take the closest one or skip
+        if not matched_seg:
+            if debug:
+                print(f"[DEBUG] No segment found for frame {frame_id} (t={timestamp:.2f}s)")
             continue
+            
+        current_text = matched_seg["text"]
 
         # 1. CLIP Check
         try:
@@ -121,7 +155,11 @@ def run(state: dict) -> dict:
                             ],
                             response_format={"type": "json_object"}
                         )
-                        result = json.loads(response.choices[0].message.content)
+                        content = response.choices[0].message.content
+                        if not content:
+                            raise ValueError("OpenAI returned empty content")
+                            
+                        result = json.loads(content)
                         status = "Consistent" if result.get("consistent") else "Inconsistent"
                         reason = f"OpenAI Fallback: {result.get('reason')}"
                         source = "openai_fallback"
@@ -149,5 +187,15 @@ def run(state: dict) -> dict:
 
     print(f"Node C2: Checked {len(gesture_checks)} frames.")
     state["gesture_check"] = gesture_checks
+    dump_node_debug(
+        state,
+        "C2",
+        {
+            "checked": len(gesture_checks),
+            "matched": sum(1 for g in gesture_checks if g.get("status") == "Consistent"),
+            "inconsistent": sum(1 for g in gesture_checks if g.get("status") == "Inconsistent"),
+        },
+    )
     
+    print("C2 returning")
     return state

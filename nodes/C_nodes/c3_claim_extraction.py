@@ -4,6 +4,7 @@ import json
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
+from nodes import dump_node_debug
 
 load_dotenv()
 
@@ -13,15 +14,18 @@ logger = logging.getLogger(__name__)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = "gpt-4o"
 
+print("Module C3 imported", flush=True)
+
 def extract_claims_openai(transcript: str, ocr_results: list) -> list:
     """
     Uses OpenAI API to extract factual claims from transcript and OCR text.
     """
+    print("C3: Inside extract_claims_openai...", flush=True)
     if not OPENAI_API_KEY:
-        logger.warning("C3: OPENAI_API_KEY not found. Skipping extraction.")
+        print("C3: OPENAI_API_KEY not found. Skipping extraction.", flush=True)
         return []
 
-    logger.info("C3: Attempting OpenAI Claim Extraction...")
+    print("C3: Attempting OpenAI Claim Extraction...", flush=True)
     
     ocr_text = ""
     for item in ocr_results:
@@ -56,9 +60,14 @@ def extract_claims_openai(transcript: str, ocr_results: list) -> list:
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            timeout=30.0
         )
         content = response.choices[0].message.content
+        if not content:
+            logger.warning("C3: OpenAI returned empty content.")
+            return []
+            
         result = json.loads(content)
         claims = result.get("claims", [])
         
@@ -66,6 +75,7 @@ def extract_claims_openai(transcript: str, ocr_results: list) -> list:
         for txt in claims:
             formatted_claims.append({
                 "claim_text": txt,
+                "text": txt,  # also store under 'text' for UI and downstream matching
                 "source": "openai",
                 "confidence": 0.95
             })
@@ -83,12 +93,12 @@ def run(state: dict) -> dict:
     1. Transcript (from A2)
     2. OCR Results (from V2)
     """
-    print("--- C3: Claim Extraction (OpenAI Only) ---")
+    print("--- C3: Claim Extraction (OpenAI Only) ---", flush=True)
     
     transcript = state.get("transcript", "")
     ocr_results = state.get("ocr_results", [])
     
-    print("C3: Attempting OpenAI Claim Extraction...")
+    print("C3: Attempting OpenAI Claim Extraction...", flush=True)
     final_claims = extract_claims_openai(transcript, ocr_results)
     
     if final_claims:
@@ -101,5 +111,5 @@ def run(state: dict) -> dict:
         print(f" - {c['claim_text'][:50]}... (Conf: {c['confidence']})")
 
     state["claims"] = final_claims
+    dump_node_debug(state, "C3", {"claims": len(final_claims)})
     return state
-
