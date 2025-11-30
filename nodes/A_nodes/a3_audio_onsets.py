@@ -32,8 +32,6 @@ def run(state: dict) -> dict:
         state["audio_onsets"] = onset_times_list
         state["onset_count"] = len(onset_times_list)
         
-        # --- New: Calculate Audio Envelope (RMS) ---
-        # We target a specific FPS if available, otherwise default to 30fps for envelope
         metadata = state.get("metadata", {})
         fps = metadata.get("fps", 30.0)
         duration = metadata.get("duration")
@@ -41,7 +39,6 @@ def run(state: dict) -> dict:
         hop_length = int(sr / fps)
         rms = librosa.feature.rms(y=y, frame_length=hop_length*2, hop_length=hop_length, center=True)[0]
         
-        # Interpolate to match exact number of frames if duration is known
         if duration:
             target_frames = int(duration * fps)
             if len(rms) != target_frames:
@@ -52,7 +49,6 @@ def run(state: dict) -> dict:
                 )
         
         state["audio_envelope"] = rms.tolist()
-        # -------------------------------------------
         
         if "metadata" not in state:
             state["metadata"] = {}
