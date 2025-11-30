@@ -165,6 +165,19 @@ def run(state: dict) -> dict:
         {"fake_probability": fake_prob, "features": features},
     )
 
+    # Save features to cache
+    try:
+        input_path = state.get("input_path", "")
+        if input_path:
+            os.makedirs("features", exist_ok=True)
+            video_name = os.path.basename(input_path)
+            feature_file = os.path.join("features", f"{video_name}.json")
+            with open(feature_file, "w") as f:
+                json.dump(features, f, indent=2)
+            print(f"LR Node: Saved features to {feature_file}")
+    except Exception as e:
+        print(f"LR Node: Warning - failed to save feature cache: {e}")
+
     label = state.get("label")
     if label in (0, 1):
         lr = 0.005

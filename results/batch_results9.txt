@@ -1,0 +1,15 @@
+Video Name                                                   | Label | Prob       | Pred  | Status
+----------------------------------------------------------------------------------------------------
+Biden AI Deepfake Goes TOO FAR – Internet Freaks Out!.mp4    | 1     | 0.67216170017329113229     | FAKE  | CORRECT
+Could A Giant Sponge Stop A Tsunami 🤔.mp4                    | 0     | 0.35001463247037839510     | REAL  | CORRECT
+Elon Musk's Deep Fake Video Promoting a Crypto Scam.mp4      | 1     | 0.60143532118323361768     | FAKE  | CORRECT
+Vi presenterar iPhone 15 ｜ WOW ｜ Apple.mp4                   | 0     | 0.49450996687829829046     | REAL  | CORRECT
+2025 June 16 BBC One minute World News.mp4                   | 0     | 0.46154205695911326712     | REAL  | CORRECT
+google.mp4                                                   | 0     | 0.49972964648682599575     | REAL  | CORRECT
+Is College A Scam？🤯🎓.mp4                                     | 0     | 0.49892132919727932849     | REAL  | CORRECT
+Very realistic Tom Cruise Deepfake ｜ AI Tom Cruise.mp4       | 1     | 0.68140556383763983828     | FAKE  | CORRECT
+Deepfake of Zelenskyy Tells Ukrainian Troops to ‘Surrender’.mp4 | 1     | 0.50170050987666203746     | FAKE  | CORRECT
+Jordan Peele uses AI, President Obama in fake news PSA.mp4   | 1     | 0.53446991456234593798     | FAKE  | CORRECT
+How do you know you exist？ - James Zucker.mp4                | 0     | 0.46509105654812682440     | REAL  | CORRECT
+
+Total Accuracy: 100.00% (11/11)
