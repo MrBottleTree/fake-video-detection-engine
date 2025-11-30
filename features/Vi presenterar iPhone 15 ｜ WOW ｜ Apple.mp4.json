@@ -1,0 +1,11 @@
+{
+  "speech_rate": 0.06565656565656566,
+  "pause_ratio": 0.0,
+  "lip_sync": 0.3629525921174458,
+  "gesture_score": 0.8571428571428571,
+  "blink_rate": 1.0,
+  "headpose_jerk": 0.5935915253762785,
+  "texture": 0.0,
+  "claim_reliability": 0.0,
+  "evidence_reliability": 0.0
+}
